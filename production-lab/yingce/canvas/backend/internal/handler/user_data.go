@@ -519,6 +519,22 @@ func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 		}
 		ok(c, gin.H{"projects": rows})
 	})
+	r.POST("/canvas-projects/:id/purge", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		if err := svc.FGPurgeCanvas(user.ID, c.Param("id")); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				fail(c, http.StatusNotFound, errors.New("画布不存在、未移入回收站或无权彻底删除"))
+				return
+			}
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"id": c.Param("id"), "purged": true, "recycled": true})
+	})
 	r.POST("/canvas-projects/:id/restore", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {

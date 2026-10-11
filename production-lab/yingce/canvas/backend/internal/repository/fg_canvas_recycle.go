@@ -14,7 +14,7 @@ func (r *Repository) FGRecycledCanvases(userID string) ([]model.CanvasProject, e
 		return nil, gorm.ErrRecordNotFound
 	}
 	var rows []model.CanvasProject
-	err := r.db.Model(&model.CanvasProject{}).Where("deleted_at IS NOT NULL").Where("(user_id=?"+fgMemberManagementScope(r.db, userID, "canvas_projects.user_id")+")", userID).
+	err := r.db.Model(&model.CanvasProject{}).Where("deleted_at IS NOT NULL AND purged_at IS NULL").Where("(user_id=?"+fgMemberManagementScope(r.db, userID, "canvas_projects.user_id")+")", userID).
 		Select("id", "user_id", "project_id", "title", "revision", "deleted_at", "deleted_by", "updated_at").Order("deleted_at DESC, id ASC").Find(&rows).Error
 	return rows, err
 }
@@ -25,7 +25,7 @@ func (r *Repository) FGRestoreCanvas(userID, id string) error {
 	}
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var canvas model.CanvasProject
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NOT NULL", id).First(&canvas).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NOT NULL AND purged_at IS NULL", id).First(&canvas).Error; err != nil {
 			return err
 		}
 		if !New(tx).FGCanManageOwner(userID, canvas.UserID) {

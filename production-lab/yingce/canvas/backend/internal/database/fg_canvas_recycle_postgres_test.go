@@ -51,10 +51,14 @@ func TestFGCanvasRecyclePostgresUpgrade(t *testing.T) {
 	if err = db.Select("ID", "UserID", "ProjectID", "Title", "PayloadJSON", "Revision", "CreatedAt", "UpdatedAt").Create(&before).Error; err != nil {
 		t.Fatal(err)
 	}
-	migration := schemaMigrations[len(schemaMigrations)-1]
 	for i := 0; i < 2; i++ {
-		if err = db.Transaction(migration.apply); err != nil {
-			t.Fatal(err)
+		for _, migration := range schemaMigrations {
+			if migration.version < 50 {
+				continue
+			}
+			if err = db.Transaction(migration.apply); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	var after model.CanvasProject

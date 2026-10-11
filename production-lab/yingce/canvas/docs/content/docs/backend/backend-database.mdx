@@ -324,6 +324,8 @@ schema v27 为 `channel_model_price_tiers` 和 `billing_orders` 添加 `cost_con
 
 素材状态为 `archived` 时进入回收站。后台按“资源与请求策略”中的 `recycleBinRetentionDays` 定期扫描过期项；`0` 表示永久保留。自动清理与用户手动彻底删除复用同一 service 引用校验和 `resource_deletion_jobs` Outbox，仍被画布、项目、任务或其他业务记录引用的素材不会被删除。
 
+FG 独立部署的画布回收站使用固定 30 天保留期。迁移 50 增加 `canvas_projects.deleted_at/deleted_by`，迁移 51 增加 `purged_at`；二者均为增量迁移。彻底删除与恢复锁定同一行，先确认无活动生成任务或 Agent，再把画布正文、完整历史及资源编号写入 NAS `#recycle/canvases` 的工程归档。写入失败不设置 `purged_at`。成功后清空数据库中的正文与历史正文，只保留防止旧客户端重建的版本墓碑及资源引用；工程归档不复制整套源码、数据库或大媒体。素材库和共享资源仍在原资源目录，引用保护持续有效。NAS 目录必须通过 `CANVAS_FG_NAS_ROOT` 明确配置并通过就绪标记、目录和符号链接校验。
+
 ## 画布生成工具
 
 Schema 30 新增 `tools`，31 新增 `tool_favorites`；主分支已有 28（Agent 执行日志）、29（资源租约）编号和 checksum 不变。

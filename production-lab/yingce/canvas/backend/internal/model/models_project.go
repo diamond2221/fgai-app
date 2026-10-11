@@ -394,6 +394,7 @@ type CanvasProject struct {
 	Revision    int64      `json:"revision" gorm:"not null;default:1"`
 	DeletedAt   *time.Time `json:"deletedAt,omitempty" gorm:"index"`
 	DeletedBy   string     `json:"deletedBy,omitempty" gorm:"size:36"`
+	PurgedAt    *time.Time `json:"purgedAt,omitempty" gorm:"index"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt" gorm:"index:idx_canvas_projects_user_updated,priority:2;index:idx_canvas_projects_user_project_updated,priority:3"`
 }
