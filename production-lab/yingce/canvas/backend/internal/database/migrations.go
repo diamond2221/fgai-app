@@ -183,6 +183,9 @@ var schemaMigrations = []migration{
 		return nil
 	}},
 	{version: 52, name: "fg_project_archive", checksum: "sha256:fg-project-archive-v52-20261011", apply: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasTable(&model.Project{}) {
+			return tx.AutoMigrate(&model.Project{})
+		}
 		if !tx.Migrator().HasColumn(&model.Project{}, "FGDeletedAt") {
 			return tx.Migrator().AddColumn(&model.Project{}, "FGDeletedAt")
 		}
