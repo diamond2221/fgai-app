@@ -21,6 +21,7 @@ COPY deploy/entry.py /app/fg-entry.py
 COPY deploy/company_cost.py /app/company_cost.py
 COPY deploy/company_request.py /app/company_request.py
 COPY deploy/company_recycle.py /app/company_recycle.py
+RUN chmod 0644 /app/fg-entry.py /app/company_cost.py /app/company_request.py /app/company_recycle.py
 COPY --from=frontend-builder /build/frontend/dist/ /app/frontend/dist/
 COPY SOURCE.md /app/FG-SOURCE.md
 COPY upstream/ /app/fg-source/upstream/
@@ -29,4 +30,5 @@ COPY SOURCE.md /app/fg-source/SOURCE.md
 RUN tar -czf /app/fg-source.tar.gz -C /app/fg-source .
 ENV HOME=/state/home ARCREEL_DATA_DIR=/workspace DATABASE_URL=sqlite+aiosqlite:////state/arcreel.db AUTH_ENABLED=false
 USER fg
+RUN /app/.venv/bin/python -c "from pathlib import Path; compile(Path('/app/fg-entry.py').read_text(), 'fg-entry', 'exec'); import company_recycle; company_recycle.install()"
 CMD ["/app/.venv/bin/python", "/app/fg-entry.py"]
