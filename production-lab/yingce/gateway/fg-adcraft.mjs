@@ -251,7 +251,7 @@ export async function adcraftInternalRoute(req,res,{pool,web,publicOrigin,canvas
     const logical=createHash('sha256').update(JSON.stringify([context.operation,context.actor,mode,payload])).digest('hex');
     const client=await pool.connect();let job;
     try{await client.query('BEGIN');const locked=(await client.query('SELECT budget_cny FROM fg_adcraft_workspaces WHERE id=$1 FOR UPDATE',[workspace.id])).rows[0];if(!locked)throw Error('广告项目不存在');job=(await client.query('SELECT * FROM fg_adcraft_jobs WHERE workspace_id=$1 AND logical_key=$2',[workspace.id,logical])).rows[0];
-      if(!job){const used=await budgetUsage(client,workspace.id);if(Number(locked.budget_cny)>0&&(amount===null||used+amount>Number(locked.budget_cny)))throw Error(amount===null?'此规格不能确定费用上限，请联系超级管理员':'广告项目预算不足，请联系超级管理员调整预算');job={id:randomUUID()};await client.query('INSERT INTO fg_adcraft_jobs(id,workspace_id,actor_id,logical_key,mode,reserved_cny) VALUES($1,$2,$3,$4,$5,$6)',[job.id,workspace.id,actor.id,logical,mode,amount??0]);}
+      if(!job){const used=await budgetUsage(client,workspace.id);if(Number(locked.budget_cny)>0&&(amount===null||used+amount>Number(locked.budget_cny)))throw Object.assign(Error(amount===null?'此规格不能确定费用上限，请联系超级管理员':'广告项目预算不足，请联系超级管理员调整预算'),{code:amount===null?'fg_adcraft_cost_unknown':'fg_adcraft_budget_insufficient'});job={id:randomUUID()};await client.query('INSERT INTO fg_adcraft_jobs(id,workspace_id,actor_id,logical_key,mode,reserved_cny) VALUES($1,$2,$3,$4,$5,$6)',[job.id,workspace.id,actor.id,logical,mode,amount??0]);}
       await client.query('COMMIT');
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
     if(!job.task_id){
@@ -271,7 +271,7 @@ export async function adcraftInternalRoute(req,res,{pool,web,publicOrigin,canvas
     if(mode==='image'){json(res,{created:Math.floor(Date.now()/1000),data:[{url:await resultURL(pool,cookie,env,result)}]},200,false);return true;}
     const message={role:'assistant',content:result.text||null,...(result.toolCalls?.length?{tool_calls:result.toolCalls}: {})};
     json(res,{id:'chatcmpl-'+task.id,object:'chat.completion',created:Math.floor(Date.now()/1000),model,choices:[{index:0,message,finish_reason:result.toolCalls?.length?'tool_calls':'stop'}]},200,false);return true;
-  }catch(error){json(res,{error:{message:error.message,type:'fg_adcraft_error'}},400,false);return true;}
+  }catch(error){json(res,{error:{message:error.message,type:'fg_adcraft_error',...(['fg_adcraft_budget_insufficient','fg_adcraft_cost_unknown'].includes(error.code)?{code:error.code}:{})}},400,false);return true;}
 }
 export async function resultURL(pool,cookie,env,result){
   const output=outputResource(result);let id=output.resourceId||String(output.storageKey||'').replace(/^resource:/,'');

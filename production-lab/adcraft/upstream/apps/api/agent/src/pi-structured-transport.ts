@@ -1303,6 +1303,19 @@ function normalizeTransportFailure(
     );
   }
   if (error instanceof AgentOperationFailure) return error;
+  const gatewayError = error && typeof error === "object"
+    ? (error as { error?: { type?: unknown; code?: unknown } }).error
+    : undefined;
+  if (gatewayError?.type === "fg_adcraft_error"
+    && gatewayError.code === "fg_adcraft_budget_insufficient") {
+    return new AgentOperationFailure(
+      "agent_project_budget_exceeded",
+      "Advertising project budget is insufficient. Review pending receipts or adjust the project budget before retrying.",
+      true,
+      stage,
+      attemptMetadata,
+    );
+  }
   return new AgentOperationFailure(
     "agent_provider_transport_failed",
     "agent_provider_transport_failed",

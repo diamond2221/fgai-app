@@ -82,6 +82,10 @@ _SAFE_FAILURE_MESSAGES = {
     "agent_publication_failed": "Agent result publication failed.",
     "agent_provider_timeout": "Agent provider request timed out.",
     "agent_provider_transport_failed": "Agent provider transport failed.",
+    "agent_project_budget_exceeded": (
+        "Advertising project budget is insufficient. Review pending receipts "
+        "or adjust the project budget before retrying."
+    ),
     "agent_run_cancelled": "Agent run was cancelled.",
     "agent_runtime_unavailable": "Agent runtime is unavailable.",
     "agent_stream_backpressure_exceeded": ("Agent runtime stream exceeded its byte budget."),

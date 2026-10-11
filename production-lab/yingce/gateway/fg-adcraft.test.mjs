@@ -99,7 +99,7 @@ for(const [mode,path,payload] of [
 });
 test('budget rejects a request before creating a paid task',async()=>{
  const f=fixture(.001),saved=global.fetch;global.fetch=f.nativeFetch;
- try{const result=await invoke(f,'/images/generations',{prompt:'产品图'});assert.equal(result.status,400);assert.match(result.response.error.message,/预算不足/);assert.equal(f.submissions.length,0);}finally{global.fetch=saved;}
+ try{const result=await invoke(f,'/images/generations',{prompt:'产品图'});assert.equal(result.status,400);assert.equal(result.response.error.code,'fg_adcraft_budget_insufficient');assert.match(result.response.error.message,/预算不足/);assert.equal(f.submissions.length,0);assert.equal(f.jobs.size,0);}finally{global.fetch=saved;}
 });
 test('unsigned caller cannot create a paid task',async()=>{
  const f=fixture();const result=await invoke(f,'/images/generations',{prompt:'产品图'},'invalid');assert.equal(result.status,400);assert.equal(f.submissions.length,0);

@@ -3658,6 +3658,11 @@ class AgentCanvasConversationRepository:
                 )
                 for timeline_row in timeline_rows:
                     metadata = json.loads(str(timeline_row["metadata_json"]))
+                    # Expert activities publish a new terminal presentation below.
+                    # Mutating their original working entry leaves its message key
+                    # and sequence unchanged, so live clients retain the old card.
+                    if timeline_row["entry_type"] == "expert_activity":
+                        continue
                     if metadata.get("turn_id") != turn_id:
                         continue
                     connection.execute(
@@ -3694,36 +3699,20 @@ class AgentCanvasConversationRepository:
                     .one_or_none()
                 )
                 if activity is not None:
-                    connection.execute(
-                        update(AgentCanvasExpertActivityRow)
-                        .where(AgentCanvasExpertActivityRow.activity_id == activity["activity_id"])
-                        .values(
-                            status="failed",
-                            error_code=code,
-                            error_message=message,
-                            updated_at=now,
-                        )
-                    )
-                    activity_payload = {
-                        "activity_id": str(activity["activity_id"]),
-                        "turn_id": turn_id,
-                        "capability_id": str(activity["capability_id"]),
-                        "capability_display_name": str(activity["display_name"]),
-                        "operation": str(activity["operation"]),
-                        "status": "failed",
-                        "error_code": code,
-                    }
-                    self._events.append_in_transaction(
+                    publish_expert_activity_terminal_in_transaction(
                         connection,
-                        V2EventInsert(
-                            workflow_id=str(turn["workflow_id"]),
-                            conversation_id=str(turn["conversation_id"]),
-                            turn_id=turn_id,
-                            event_type="expert_activity_failed",
-                            transition_key=(f"conversation:{turn_id}:expert_activity_failed"),
-                            created_at=now,
-                            payload=activity_payload,
-                        ),
+                        self._events,
+                        turn_id=turn_id,
+                        status="failed",
+                        now=now,
+                        response_locale=response_locale,
+                        error_code=code,
+                        error_message=message,
+                        event_details={
+                            "retryable": retryable,
+                            "operation_stage": operation_stage,
+                            "actionable_failure": actionable_failure.model_dump(mode="json"),
+                        },
                     )
                     self._events.append_in_transaction(
                         connection,

@@ -89,6 +89,25 @@ const unionSchema = {
   oneOf: [{ $ref: "#/$defs/Audio" }, { type: "object", required: ["other"] }],
 };
 
+test("an FG project budget denial remains actionable without automatic paid retries", async () => {
+  let calls = 0;
+  const router = new PiStructuredTransportRouter({ execute: async () => {
+    calls += 1;
+    throw Object.assign(new Error("private upstream detail must not be shown"), {
+      status: 400,
+      error: { type: "fg_adcraft_error", code: "fg_adcraft_budget_insufficient" },
+    });
+  } });
+  await assert.rejects(router.run({ ...input(), submit: async value => validate(value) }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal((error as Error & { code: string }).code, "agent_project_budget_exceeded");
+      assert.doesNotMatch(error.message, /private upstream/);
+      return true;
+    });
+  assert.equal(calls, 1);
+});
+
 test("tool transport wraps root unions while retaining root definitions and the original schema", () => {
   const original = JSON.stringify(unionSchema);
   const request = buildPrimaryStructuredCompletionRequest({ ...input(), schema: unionSchema });

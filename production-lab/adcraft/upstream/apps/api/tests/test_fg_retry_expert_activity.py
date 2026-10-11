@@ -1,5 +1,6 @@
 """Capability retries must publish their own expert activity atomically."""
 from datetime import datetime, timezone
+import json
 
 import pytest
 from sqlalchemy import insert, select, func
@@ -81,3 +82,46 @@ def test_activity_write_failure_rolls_back_retry_envelope_and_queue(retry_reposi
         assert connection.execute(select(func.count()).select_from(AgentCanvasChatTurnRow)).scalar_one() == 1
         for model in (AgentCanvasExpertActivityRow, AgentCanvasContinuationOutboxRow, AgentCanvasOperationEnvelopeRow):
             assert connection.execute(select(func.count()).select_from(model)).scalar_one() == 0
+
+
+def test_failed_retry_publishes_a_new_terminal_timeline_revision(retry_repository):
+    repository, database, retry = retry_repository
+    accepted = retry()
+    with database.engine.connect() as connection:
+        started = connection.execute(select(AgentCanvasChatEntryRow).where(
+            AgentCanvasChatEntryRow.entry_type == 'expert_activity')).mappings().one()
+    repository.fail_turn(accepted.turn_id, code='agent_provider_transport_failed',
+        message='Agent provider transport failed.', retryable=True, response_locale='zh-CN')
+    with database.engine.connect() as connection:
+        entries = connection.execute(select(AgentCanvasChatEntryRow).where(
+            AgentCanvasChatEntryRow.entry_type == 'expert_activity').order_by(
+                AgentCanvasChatEntryRow.sequence_no)).mappings().all()
+        activity = connection.execute(select(AgentCanvasExpertActivityRow)).mappings().one()
+    assert len(entries) == 2
+    assert entries[-1]['sequence_no'] > started['sequence_no']
+    metadata = json.loads(entries[-1]['metadata_json'])
+    assert metadata['message_key'] == 'expert_activity.failed'
+    assert metadata['response_locale'] == 'zh-CN'
+    assert metadata['presentation_key'] == json.loads(started['metadata_json'])['presentation_key']
+    assert metadata['error_code'] == 'agent_provider_transport_failed'
+    assert activity['status'] == 'failed'
+    # Repeated failure delivery must not publish a second terminal card.
+    repository.fail_turn(accepted.turn_id, code='agent_provider_transport_failed',
+        message='Agent provider transport failed.', retryable=True, response_locale='zh-CN')
+    with database.engine.connect() as connection:
+        assert connection.execute(select(func.count()).select_from(AgentCanvasChatEntryRow).where(
+            AgentCanvasChatEntryRow.entry_type == 'expert_activity')).scalar_one() == 2
+
+
+def test_failed_retry_publication_is_atomic(retry_repository, monkeypatch):
+    repository, database, retry = retry_repository
+    accepted = retry()
+    def fail(*args, **kwargs):
+        raise RuntimeError('Simulated terminal publication failure')
+    monkeypatch.setattr(conversations, 'publish_expert_activity_terminal_in_transaction', fail)
+    with pytest.raises(RuntimeError, match='terminal publication'):
+        repository.fail_turn(accepted.turn_id, code='agent_provider_transport_failed',
+            message='Agent provider transport failed.', retryable=True)
+    assert repository.get_turn(accepted.turn_id).status != 'failed'
+    with database.engine.connect() as connection:
+        assert connection.execute(select(AgentCanvasExpertActivityRow.status)).scalar_one() == 'working'
