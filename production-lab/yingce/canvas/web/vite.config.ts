@@ -11,7 +11,11 @@ const buildTime = process.env.CANVAS_BUILD_TIME?.trim() || process.env.VITE_BUIL
 const appChangelog = readFileSync(resolve(webDir, "../FG-CHANGELOG.md"), "utf8");
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET?.trim() || "http://127.0.0.1:8080";
 
-export default defineConfig({
+export default defineConfig(({ command }) => {
+    if (command === "build" && process.env.CANVAS_BUILD_VERSION?.trim() && !process.env.FG_CANVAS_BASE_PATH?.trim()) {
+        throw new Error("发布构建必须明确设置 FG_CANVAS_BASE_PATH；FG 工作区请使用 bun run build:fg，避免资源路径错误导致白屏。");
+    }
+    return {
     base: process.env.FG_CANVAS_BASE_PATH || "/",
     plugins: [react()],
     define: {
@@ -82,4 +86,5 @@ export default defineConfig({
             },
         },
     },
+    };
 });

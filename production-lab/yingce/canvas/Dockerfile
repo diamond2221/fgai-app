@@ -40,7 +40,7 @@ RUN bun test test/fg-pcm-resampler.test.ts
 RUN bun test test/fg-entry-url.test.ts
 RUN bun test test/canvas-video-frame.test.ts
 RUN bun test test/document-storage.test.ts test/canvas-appearance.test.ts test/canvas-video-segment-args.test.ts test/tapnow-import.test.ts test/skill-runtime.test.ts
-RUN bun --bun ./node_modules/typescript/bin/tsc --noEmit && FG_CANVAS_BASE_PATH=/fg-six/ bun --bun ./node_modules/vite/bin/vite.js build
+RUN bun run build:fg
 
 # 运行镜像：nginx 托管静态前端，并在 Compose 中把 /api 转发到后端服务。
 FROM nginx:1.27-alpine
