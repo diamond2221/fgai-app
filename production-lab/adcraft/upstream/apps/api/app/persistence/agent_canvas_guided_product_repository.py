@@ -369,6 +369,17 @@ class AgentCanvasGuidedProductRepository:
                 ).hexdigest()
                 continuation_id = f"continuation_{identity[:24]}"
                 continuation_turn_id = f"turn_{identity[24:56]}"
+                # Freeze attribution while accepting this explicit user action,
+                # before its queue becomes visible. The source may be a synthetic
+                # guidance turn without an actor. Idempotent replays returned above
+                # must never substitute a later collaborator's identity.
+                from app.fg_context import fg_context, work_context
+
+                context = fg_context.get()
+                accepted_context = work_context(
+                    continuation_turn_id, {'workspace': context.get('workspace')})
+                if not accepted_context.get('actor') and context.get('actor'):
+                    work_context(continuation_turn_id, context)
                 next_session_revision = request.expected_session_revision + 1
                 journey = parse_production_journey(str(session["journey_state_json"]))
                 next_journey = journey.model_copy(

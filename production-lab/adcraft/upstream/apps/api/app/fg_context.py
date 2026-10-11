@@ -40,7 +40,13 @@ def restored_work_context(resource_id: str):
 
 def continuation_context(source_turn: str, next_turn: str, context: dict) -> dict:
     """Recover the accepted turn's actor, never a polling collaborator's actor."""
-    accepted = work_context(source_turn, {'workspace': context.get('workspace')})
+    lookup = {'workspace': context.get('workspace')}
+    # A newly accepted Product step may follow a synthetic bookkeeping turn.
+    # Its own durable identity takes precedence over the earlier turn's actor.
+    accepted = work_context(next_turn, lookup)
+    if accepted.get('actor'):
+        return accepted
+    accepted = work_context(source_turn, lookup)
     if accepted.get('actor'):
         work_context(next_turn, accepted)
     return accepted

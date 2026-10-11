@@ -27,6 +27,29 @@ class ContinuationIdentityTest(unittest.TestCase):
                 'workspace': 'project', 'actor': 'polling-collaborator'})
         self.assertNotIn('actor', accepted)
 
+    def test_accepted_next_turn_survives_a_synthetic_source(self):
+        stored = {'next': {'workspace': 'project', 'actor': 'accepted'}}
+        with patch('app.fg_context.work_context', side_effect=lambda key, value: stored.get(key, value)):
+            accepted = continuation_context('synthetic', 'next', {
+                'workspace': 'project', 'actor': 'polling-collaborator'})
+        self.assertEqual(accepted.get('actor'), 'accepted')
+
+    def test_explicit_next_turn_is_not_overwritten_by_an_earlier_actor(self):
+        stored = {
+            'source': {'workspace': 'project', 'actor': 'earlier-author'},
+            'next': {'workspace': 'project', 'actor': 'accepted-step-author'},
+        }
+
+        def persist(key, value):
+            if value.get('actor'):
+                stored[key] = value
+            return stored.get(key, value)
+
+        with patch('app.fg_context.work_context', side_effect=persist):
+            accepted = continuation_context('source', 'next', {'workspace': 'project'})
+        self.assertEqual(accepted.get('actor'), 'accepted-step-author')
+        self.assertEqual(stored['next']['actor'], 'accepted-step-author')
+
 
 if __name__ == '__main__':
     unittest.main()
