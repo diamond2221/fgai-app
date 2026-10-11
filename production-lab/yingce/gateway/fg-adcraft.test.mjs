@@ -53,7 +53,7 @@ function fixture(budget=100){
   const pathname=new URL(url).pathname;
   if(pathname==='/api/tasks') {const payload=JSON.parse(options.body);submissions.push(payload);return Response.json({code:0,data:{id:'test-task-'+submissions.length}});}
   if(pathname.startsWith('/api/tasks/')){reads++;const type=submissions.at(-1).input.mode;return Response.json({code:0,data:{status:'succeeded',resultJson:JSON.stringify(type==='text'?{text:'已执行',toolCalls:[{id:'tool-1',type:'function',function:{name:'write_script',arguments:'{"title":"测试"}'}}]}:type==='video'?{video:{resourceId:'nas-video'}}:{images:[{resourceId:'nas-image'}]})}});}
-  if(pathname==='/api/resources/access'){assert.ok(Array.isArray(JSON.parse(options.body)));return Response.json({code:0,data:{items:[{access:{url:'https://fg.invalid/signed-nas-media'}}]}});}
+  if(pathname==='/api/resources/access'){const body=JSON.parse(options.body);assert.ok(Array.isArray(body));return Response.json({code:0,data:{items:[{access:{url:'https://fg.invalid/api/public/resources/'+body[0].resourceId+'/file?signature=test'}}]}});}
   throw Error('Unexpected outbound request: '+url);
  };
  return {pool,submissions,jobs,nativeFetch,get reads(){return reads;}};
@@ -92,7 +92,7 @@ for(const [mode,path,payload] of [
  const f=fixture();const saved=global.fetch;global.fetch=f.nativeFetch;
  try{const result=await invoke(f,path,payload);assert.equal(result.status,200,JSON.stringify(result.response));assert.equal(f.submissions.length,1);const task=f.submissions[0];assert.equal(task.projectId,'fg-project');assert.equal(task.input.metadata.adcraftWorkspaceId,workspace);assert.equal(task.input.config.channelId,'company-wetoken');assert.ok([...f.jobs.values()][0].reserved_cny>0);
   if(mode==='text'){assert.equal(result.response.choices[0].message.tool_calls[0].function.name,'write_script');assert.equal(task.input.agentRequests.chatCompletion.model,'gpt-5.6-sol-t1a');}
-  if(mode==='image')assert.equal(result.response.data[0].url,'https://fg.invalid/signed-nas-media');
+  if(mode==='image')assert.equal(result.response.data[0].url,'http://mock-fg/api/public/resources/nas-image/file?signature=test');
   if(mode==='video'){assert.equal(task.input.config.videoGenerateAudio,'true');assert.equal(result.response.id,'test-task-1');}
   const repeat=await invoke(f,path,payload);assert.equal(repeat.status,200);assert.equal(f.submissions.length,1,'same operation cannot submit twice');
  }finally{global.fetch=saved;}

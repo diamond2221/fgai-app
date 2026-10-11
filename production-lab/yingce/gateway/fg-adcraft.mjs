@@ -279,5 +279,10 @@ export async function resultURL(pool,cookie,env,result){
   if(!id)throw Error('制作结果尚未归档到 NAS，请从任务记录恢复');
   // The browser resource API permits signed copy access. Provider-only access is
   // reserved for the native execution service and is rejected by this endpoint.
-  const data=await nativeAPI(env.web,cookie,env.publicOrigin,'/resources/access','POST',[{resourceId:id,purpose:'copy',variant:'original'}]);const url=data.items?.[0]?.access?.url;if(!url)throw Error('制作素材链接暂时不可用');return new URL(url,process.env.CANVAS_PUBLIC_BASE_URL||env.publicOrigin).href;
+  const data=await nativeAPI(env.web,cookie,env.publicOrigin,'/resources/access','POST',[{resourceId:id,purpose:'copy',variant:'original'}]);const url=data.items?.[0]?.access?.url;if(!url)throw Error('制作素材链接暂时不可用');
+  // This response is consumed by AdCraft inside Docker. Keep the native signed
+  // capability, but read through the existing internal service instead of a tunnel.
+  const signed=new URL(url,env.publicOrigin);
+  if(signed.pathname!=='/api/public/resources/'+id+'/file')throw Error('制作素材链接路径无效');
+  return new URL(signed.pathname+signed.search,env.web).href;
 }
