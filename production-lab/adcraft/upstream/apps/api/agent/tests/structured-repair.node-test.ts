@@ -5,6 +5,7 @@ import type { AgentRunRequest } from "../src/generated/agent-runtime.js";
 import type { AgentCredentialSnapshot } from "../src/python-internal-client.js";
 import {
   PiStructuredTransportRouter,
+  buildPrimaryStructuredCompletionRequest,
   type StructuredCompletionRequest,
   type StructuredCompletionResponse,
 } from "../src/pi-structured-transport.js";
@@ -162,4 +163,62 @@ test("a validator denial of repair remains terminal without resubmission", async
     return { ...validation, result: { ...validation.result, repair_allowed: false } };
   } }), /agent_structured_output_invalid/);
   assert.equal(calls, 1);
+});
+
+for (const model of ["claude-sonnet-5-5-t3a", "claude-opus-5-5-t3a", "claude-sonnet-5-5", "claude-opus-5-5"] as const) {
+  test(`${model} uses automatic tool selection without unsupported thinking switches`, () => {
+    const request = buildPrimaryStructuredCompletionRequest({ ...input(), credential: {
+      ...credential, model_ref: `volcengine_ark:${model}`, model_id: model,
+    } });
+    assert.equal(request.tool_choice, "auto");
+    assert.equal(request.tools?.[0]?.function.name, "submit_structured_result");
+    assert.equal(request.enable_thinking, undefined);
+    assert.equal(request.thinking_budget, undefined);
+    assert.equal(request.reasoning_effort, undefined);
+    assert.equal(request.max_tokens, 4096);
+  });
+}
+
+test("other text models retain their configured structured tool choice", () => {
+  for (const model of ["deepseek-v4-pro", "gpt-5.6-sol-t1a", "claude-sonnet-4-6", "claude-sonnet-5-50-test"]) {
+    const request = buildPrimaryStructuredCompletionRequest({ ...input(), credential: {
+      ...credential, model_id: model,
+    } });
+    assert.deepEqual(request.tool_choice, {
+      type: "function", function: { name: "submit_structured_result" },
+    });
+  }
+});
+
+test("automatic Claude tool output still passes the same semantic validator", async () => {
+  const requests: StructuredCompletionRequest[] = [];
+  const router = new PiStructuredTransportRouter({ execute: async request => {
+    requests.push(request);
+    return response(candidate("音频生成"), false);
+  } });
+  const result = await router.run({ ...input(), credential: {
+    ...credential, model_id: "claude-sonnet-5-5-t3a",
+  }, submit: async value => validate(value) });
+  assert.equal(requests[0]?.tool_choice, "auto");
+  assert.equal(requests.length, 1);
+  assert.deepEqual(result.value, candidate("音频生成"));
+});
+
+test("Claude text instead of a tool result gets only one validated repair", async () => {
+  const requests: StructuredCompletionRequest[] = [];
+  const router = new PiStructuredTransportRouter({ execute: async request => {
+    requests.push(request);
+    return requests.length === 1
+      ? { choices: [{ finish_reason: "stop", message: { content: "I will prepare the draft." } }] }
+      : response(candidate("音频生成"), true);
+  } });
+  const result = await router.run({ ...input(), credential: {
+    ...credential, model_id: "claude-opus-5-5-t3a",
+  }, submit: async value => validate(value) });
+  assert.equal(requests[0]?.tool_choice, "auto");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1]?.enable_thinking, undefined);
+  assert.ok(String(requests[1]?.messages[0]?.content).includes(systemPrompt));
+  assert.deepEqual(result.value, candidate("音频生成"));
+  assert.equal(result.audit.structured_attempt_count, 2);
 });

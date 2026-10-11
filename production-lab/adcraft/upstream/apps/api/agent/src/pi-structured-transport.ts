@@ -56,7 +56,7 @@ export interface NonStreamingStructuredCompletionRequest
       readonly parameters: Readonly<Record<string, unknown>>;
     };
   }>;
-  readonly tool_choice?: {
+  readonly tool_choice?: "auto" | {
     readonly type: "function";
     readonly function: { readonly name: "submit_structured_result" };
   };
@@ -681,7 +681,7 @@ export function buildPrimaryStructuredCompletionRequest(
         { role: "user" as const, content: input.userPrompt },
       ],
       max_tokens: input.credential.execution_policy.max_output_tokens,
-      ...reasoningPayload(input.credential.execution_policy),
+      ...structuredReasoningPayload(input.credential),
       ...openrouter,
     };
     if (
@@ -704,7 +704,7 @@ export function buildPrimaryStructuredCompletionRequest(
     ],
     stream: false,
     max_tokens: input.credential.execution_policy.max_output_tokens,
-    ...reasoningPayload(input.credential.execution_policy),
+    ...structuredReasoningPayload(input.credential),
     tools: [
       {
         type: "function",
@@ -715,7 +715,7 @@ export function buildPrimaryStructuredCompletionRequest(
         },
       },
     ],
-    tool_choice: {
+    tool_choice: requiresAutomaticToolSelection(input.credential) ? "auto" : {
       type: "function",
       function: { name: "submit_structured_result" },
     },
@@ -817,7 +817,8 @@ function repairPayload(
       },
     ],
     max_tokens: input.credential.execution_policy.max_output_tokens,
-    ...repairReasoningPayload(input.credential.execution_policy),
+    ...(requiresAutomaticToolSelection(input.credential)
+      ? {} : repairReasoningPayload(input.credential.execution_policy)),
     ...openrouterRequestProjection(input.credential),
   };
   if (
@@ -910,6 +911,20 @@ function isCertifiedJsonObjectCapabilityFallback(
     (metadata.safe_error_code === "response_format_unsupported" ||
       metadata.safe_error_code === "json_schema_unsupported")
   );
+}
+
+// Claude 5.5 rejects forced tool use even with its default thinking policy.
+// https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk
+// Keep the tool schema and downstream validation; only its selection is auto.
+function requiresAutomaticToolSelection(credential: AgentRuntimeTransportSource): boolean {
+  return /^claude-(?:sonnet|opus)-5-5(?:$|-)/.test(credential.model_id);
+}
+
+function structuredReasoningPayload(credential: AgentRuntimeTransportSource) {
+  // Legacy enable_thinking=false is not a Claude thinking control, and Sonnet
+  // 5.5 cannot disable thinking. Leave its provider policy intact.
+  return requiresAutomaticToolSelection(credential)
+    ? {} : reasoningPayload(credential.execution_policy);
 }
 
 function reasoningPayload(policy: AgentCredentialSnapshot["execution_policy"]): {
