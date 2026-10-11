@@ -16,6 +16,7 @@ import (
 	"yingce/backend/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
@@ -525,6 +526,10 @@ func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 			return
 		}
 		if err := svc.FGRestoreCanvas(user.ID, c.Param("id")); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				fail(c, http.StatusNotFound, errors.New("画布不存在或无权恢复"))
+				return
+			}
 			failService(c, err)
 			return
 		}
@@ -544,6 +549,10 @@ func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 			}
 			result, pageErr := svc.UserCanvasProjectsPage(user.ID, page, pageSize, c.Query("projectId"), c.Query("q"), c.Query("sort"))
 			if pageErr != nil {
+				if errors.Is(pageErr, gorm.ErrRecordNotFound) {
+					fail(c, http.StatusForbidden, errors.New("无权查看该用户的画布"))
+					return
+				}
 				failService(c, pageErr)
 				return
 			}
