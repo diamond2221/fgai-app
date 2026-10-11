@@ -55,7 +55,14 @@ func (s *Service) archiveFGCanvas(bundle repository.FGCanvasRecycleArchive) erro
 	if err != nil {
 		return err
 	}
-	return writeFGCanvasArchive(root, bundle.Canvas.UserID, bundle.Canvas.ID, bundle.Canvas.Revision, data)
+	if err := writeFGCanvasArchive(root, bundle.Canvas.UserID, bundle.Canvas.ID, bundle.Canvas.Revision, data); err != nil {
+		message := "NAS 回收归档未完成，画布仍保留在回收站，请稍后重试"
+		if errors.Is(err, os.ErrPermission) {
+			message = "NAS #recycle 没有写入权限，画布仍保留在回收站；请 NAS 管理员开放 canvases 子目录的读写权限"
+		}
+		return WrapAppError(503, message, err)
+	}
+	return nil
 }
 
 func writeFGCanvasArchive(root, owner, id string, revision int64, data []byte) error {
