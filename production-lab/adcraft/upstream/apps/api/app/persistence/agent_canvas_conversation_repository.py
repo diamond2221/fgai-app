@@ -5944,14 +5944,26 @@ def _turn(
         if row["operation_failure_json"]
         else None
     )
+    # Availability can recover after a service repair. Old typed turns were
+    # incorrectly terminal; expose manual retry while retaining their audit.
+    # ChatTurnRetryService still validates the frozen revisions, ownership,
+    # references and envelope before it can enqueue a new attempt.
+    retryable = bool(row["retryable"]) or (
+        str(row["status"]) == "failed"
+        and str(row["error_code"]) == "agent_runtime_unavailable"
+        and operation_failure is None
+        and continuation is not None
+        and continuation.operation in {"next_action", "capability_command"}
+        and continuation.status == "failed"
+    )
     actionable_failure = (
         operation_failure.actionable_failure
         if operation_failure is not None and operation_failure.actionable_failure is not None
         else (
             ActionableFailureV1(
-                failure_class=("transient" if bool(row["retryable"]) else "deterministic"),
-                retry_scope=("turn" if bool(row["retryable"]) else "none"),
-                user_action=("retry" if bool(row["retryable"]) else "none"),
+                failure_class=("transient" if retryable else "deterministic"),
+                retry_scope=("turn" if retryable else "none"),
+                user_action=("retry" if retryable else "none"),
             )
             if str(row["status"]) == "failed"
             else None
@@ -5977,7 +5989,7 @@ def _turn(
         continuation=continuation,
         retry_of_turn_id=(str(row["retry_of_turn_id"]) if row["retry_of_turn_id"] else None),
         retry_attempt_no=int(row["retry_attempt_no"]),
-        retryable=bool(row["retryable"]),
+        retryable=retryable,
         actionable_failure=actionable_failure,
         operation_stage=(str(row["operation_stage"]) if row["operation_stage"] else None),
         operation_failure=operation_failure,
