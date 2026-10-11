@@ -168,16 +168,15 @@ export function AssetLibraryPickerModal({
                 .filter((asset) => asset.kind !== "model" && (asset.kind !== "entity" || allowCharacters))
                 .map((asset) => {
                     const known = items.find((item) => item.id === asset.id);
-                    return {
+                    const fallback: AssetLibraryPickerItem = {
                         id: asset.id,
                         title: asset.title,
                         category: asset.category || "other",
                         archived: asset.status === "archived",
                         kindLabel: asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : asset.kind === "audio" ? "音频" : asset.kind === "entity" ? "角色" : "文本",
                         searchText: (asset.tags ?? []).join(" "),
-                        ...(known || (acceptRemoteItems ? {} : { disabledReason: "此素材不适用于当前操作" })),
-                        asset,
                     };
+                    return { ...fallback, ...(known || (acceptRemoteItems ? {} : { disabledReason: "此素材不适用于当前操作" })), asset };
                 }),
         [acceptRemoteItems, allowCharacters, remoteQuery.data, items],
     );

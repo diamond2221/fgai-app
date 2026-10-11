@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.1";
+export const CURRENT_RELEASE_VERSION = "1.3.2";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,17 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月11日",
+        items: [
+            { type: "修复", content: "广告助手兼容结构化联合结果，保留草稿中的工具引用；失败步骤实时显示终态，预算不足时给出明确原因。" },
+            { type: "修复", content: "广告生成结果通过内部签名素材地址读取，避免归档时依赖已失效的临时公网域名。" },
+            { type: "修复", content: "修正带渠道前缀的画布音频设置：Seed Audio 显示输出格式，豆包 2.0 显示公司音色，旧 Alloy 值按所选模型校正。" },
+            { type: "调整", content: "个人画布按所有者隔离，故事与项目继续共享；分享链接可查看，接收人可另存独立画布继续创作。" },
+            { type: "说明", content: "本次先发布已完成修复。全流程 Agent 与 Skill、部分文本请求自动对账、固定公网素材地址及 HTTPS 证书持久化仍继续验收，未通过项目不标记完成。" },
+        ],
+    },
+    {
+        version: "1.3.1",
         date: "2026年10月10日",
         items: [
             { type: "修复", content: "修复广告助手的结构化结果、后续制作步骤身份传递，以及小说助手的工具请求兼容问题；保留生成前确认与预算检查。" },
