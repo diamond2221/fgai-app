@@ -29,6 +29,16 @@ export async function creatorInternalRoute(req,res,{pool,web,publicOrigin,canvas
  const arc=path.pathname.startsWith('/internal/arcreel/');
  const routePath=arc?path.pathname.replace('/internal/arcreel/','/internal/creator/'):path.pathname;
  const capability=String(req.headers.authorization||'').replace(/^Bearer /,'')||String(req.headers['x-api-key']||'');
+ const archive=/^\/internal\/(arcreel|creator)\/([^/]+)\/archive$/.exec(path.pathname);
+ if(archive){
+  if(req.method!=='POST'||!creatorAuthorised(archive[2],capability)){json(res,{error:{message:'工程归档未授权'}},403);return true;}
+  try{
+   const owner=(await pool.query("SELECT u.id,u.display_name name,a.email,a.platform_role FROM users u JOIN fg_accounts a ON a.user_id=u.id WHERE u.id=$1 AND u.status='active'",[archive[2]])).rows[0];if(!owner)throw Error('所属账号不可用');
+   const input=await body(req,1<<20),cookie=await canvasSession({...owner,reviewer:owner.platform_role==='superadmin'});
+   const r=await fetch(new URL('/api/fg-project-files',web),{method:'POST',headers:{cookie,origin:publicOrigin,'content-type':'application/json','x-fg-archive-secret':process.env.FG_ADCRAFT_SECRET},body:JSON.stringify({...input,module:archive[1]==='creator'?'opencreator':'arcreel'}),signal:AbortSignal.timeout(120000)});
+   const result=await r.json();if(!r.ok||result.code!==0)throw Error('NAS 工程归档未完成，原工程记录仍保留');json(res,result.data);
+  }catch(e){json(res,{error:{message:e.message}},409);}return true;
+ }
  const costing=/^\/internal\/arcreel\/([^/]+)\/cost$/.exec(path.pathname);
  if(costing){
   if(req.method!=='POST'||!creatorAuthorised(costing[1],capability)){json(res,{error:{message:'导演报价未授权'}},403);return true;}

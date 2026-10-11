@@ -17,7 +17,7 @@ func fgProjectScope(db *gorm.DB, table, userID string) *gorm.DB {
 	if !fgTeamEnabled() {
 		return db.Where(table+".user_id = ?", userID)
 	}
-	return db.Where("("+table+".user_id = ? OR EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = "+table+".id)"+fgMemberManagementScope(db, userID, table+".user_id")+")", userID)
+	return db.Where(table+".fg_deleted_at IS NULL").Where("("+table+".user_id = ? OR EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = "+table+".id)"+fgMemberManagementScope(db, userID, table+".user_id")+")", userID)
 }
 func fgCanvasScope(db *gorm.DB, userID string) *gorm.DB {
 	db = db.Where("canvas_projects.deleted_at IS NULL")
@@ -41,7 +41,17 @@ func (r *Repository) FGSharedProject(id string) bool {
 		return false
 	}
 	var count int64
-	return r.db.Table("fg_story_projects").Where("native_project_id = ?", id).Count(&count).Error == nil && count > 0
+	return r.db.Table("fg_story_projects fg").Joins("JOIN projects p ON p.id=fg.native_project_id AND p.fg_deleted_at IS NULL").Where("fg.native_project_id = ?", id).Count(&count).Error == nil && count > 0
+}
+
+func (r *Repository) FGCanDeleteProject(actor string, project model.Project) bool {
+	if r.FGSharedProject(project.ID) {
+		return fgSuperadmin(r.db, actor)
+	}
+	return r.FGCanManageOwner(actor, project.UserID)
+}
+func (r *Repository) FGIsAdministrator(actor string) bool {
+	return fgTeamEnabled() && fgSuperadmin(r.db, actor)
 }
 func fgSuperadmin(db *gorm.DB, userID string) bool {
 	// A scope may receive an existing Model/Where statement. Role lookups must

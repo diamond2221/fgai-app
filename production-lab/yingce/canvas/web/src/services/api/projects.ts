@@ -231,6 +231,8 @@ export type ProjectWorkflow = {
 
 export type ProjectSummary = {
     project: Project;
+    fgShared?: boolean;
+    canDelete?: boolean;
     canvasCount: number;
     assetCount: number;
     unitCount: number;

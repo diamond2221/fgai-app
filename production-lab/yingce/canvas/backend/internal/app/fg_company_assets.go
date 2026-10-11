@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
-	"yingce/backend/internal/model"
-	"yingce/backend/internal/repository"
 	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
+	"yingce/backend/internal/model"
+	"yingce/backend/internal/repository"
 )
 
 type FGCompanyAssetInput struct {
@@ -175,6 +175,13 @@ func (s *Service) PurgeFGCompanyAsset(actor *model.User, id string, expected int
 	s.storageMu.Lock()
 	defer s.storageMu.Unlock()
 	err := s.repo.PurgeFGCompanyAsset(id, expected, func(tx *repository.Repository, item *model.FGCompanyAsset) ([]model.Resource, []model.ResourceDeletionJob, error) {
+		data, e := json.Marshal(item)
+		if e != nil {
+			return nil, nil, e
+		}
+		if e = writeFGArchive(os.Getenv("CANVAS_FG_NAS_ROOT"), "company-assets", item.PublisherID, item.ID, item.Revision, data); e != nil {
+			return nil, nil, WrapAppError(503, "NAS 公司素材归档未完成，记录仍保留", e)
+		}
 		resource, err := tx.Resource(item.ResourceID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, nil

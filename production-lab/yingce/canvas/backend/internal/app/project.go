@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -73,6 +74,8 @@ type ProjectSummary struct {
 	AssetCount         int64         `json:"assetCount"`
 	UnitCount          int           `json:"unitCount"`
 	CompletedUnitCount int           `json:"completedUnitCount"`
+	FGShared           bool          `json:"fgShared"`
+	CanDelete          bool          `json:"canDelete"`
 }
 
 type ProjectListPage struct {
@@ -140,7 +143,7 @@ func (s *Service) summarizeProjects(userID string, projects []model.Project) ([]
 				completed++
 			}
 		}
-		result = append(result, ProjectSummary{Project: project, CanvasCount: len(canvases), AssetCount: assetCount, UnitCount: len(units), CompletedUnitCount: completed})
+		result = append(result, ProjectSummary{Project: project, CanvasCount: len(canvases), AssetCount: assetCount, UnitCount: len(units), CompletedUnitCount: completed, FGShared: s.repo.FGSharedProject(project.ID), CanDelete: s.repo.FGCanDeleteProject(userID, project)})
 	}
 	return result, nil
 }
@@ -364,8 +367,22 @@ func (s *Service) DeleteProject(userID string, id string) error {
 	if err != nil {
 		return err
 	}
-	if !s.repo.FGCanManageOwner(userID, project.UserID) {
-		return Forbidden("仅创建者或有管理权限的管理员可删除项目")
+	if !s.repo.FGCanDeleteProject(userID, *project) {
+		return Forbidden("故事项目仅管理员可删除；自由短剧仅本人或有管理权限的管理员可删除")
+	}
+	if os.Getenv("CANVAS_FG_TEAM_WORKSPACE") == "true" {
+		s.storageMu.Lock()
+		defer s.storageMu.Unlock()
+		err = s.repo.FGArchiveProject(userID, id, func(owner string, revision int64, data []byte) error {
+			if e := writeFGArchive(os.Getenv("CANVAS_FG_NAS_ROOT"), "projects", owner, id, revision, data); e != nil {
+				return WrapAppError(503, "NAS 项目归档未完成，原项目仍保留，请稍后重试", e)
+			}
+			return nil
+		})
+		if errors.Is(err, repository.ErrProjectHasActiveTasks) {
+			return BadAuthRequest("项目仍有进行中的生成或 Agent 任务，请完成或取消后再删除")
+		}
+		return err
 	}
 	userID = project.UserID
 	canvases, err := s.repo.ProjectCanvasDocuments(userID, id)

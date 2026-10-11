@@ -1,11 +1,12 @@
 import fs from 'node:fs/promises';
-import {createHash} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {importFeeCsv} from './fg-fee-import.mjs';
 import {estimateCNY} from './fg-prices.mjs';
 import {priceQuote} from './fg-quotes.mjs';
 import {teamAndStoryAPI,approvedTopics,bootstrapTeam} from './fg-team-stories.mjs';
 import {financeActions} from './fg-finance-actions.mjs';
 import {modelPriceRows} from './fg-model-price-catalog.mjs';
+import {storyCatalogRoute} from './fg-story-catalog.mjs';
 
 export async function initializeFG(pool){await pool.query(await fs.readFile(new URL('./fg-schema.sql',import.meta.url),'utf8'));}
 async function jsonBody(req,max=100000){const chunks=[];let n=0;for await(const c of req){n+=c.length;if(n>max)throw new Error('请求内容过大');chunks.push(c);}return JSON.parse(Buffer.concat(chunks).toString('utf8'));}
@@ -14,7 +15,7 @@ export async function fgAPI(req,res,{actor,cookie,path,pool,web,platform,platfor
   if(!path.pathname.startsWith('/api/fg/'))return false;
   if(await financeActions(req,res,{pool,actor,path}))return true;
   const api=async(endpoint,method='GET',body)=>{
-    const r=await fetch(new URL('/api'+endpoint,web),{method,headers:{cookie,origin:publicOrigin,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
+    const r=await fetch(new URL('/api'+endpoint,web),{method,headers:{cookie,origin:publicOrigin,'content-type':'application/json',...(endpoint==='/fg-story-archive'?{'x-fg-archive-secret':process.env.FG_ADCRAFT_SECRET}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
     const j=await r.json();if(!r.ok||j.code!==0)throw new Error(j.msg||'FG 原生项目操作失败');return j.data;
   };
   try{
@@ -42,11 +43,12 @@ export async function fgAPI(req,res,{actor,cookie,path,pool,web,platform,platfor
     const seed=JSON.parse(await fs.readFile(process.env.FG_TOPICS_FILE||new URL('./topics.json',import.meta.url),'utf8'));
     if(await teamAndStoryAPI(req,res,{actor,cookie,path,pool,web,platform,platformCookie,publicOrigin},{body:jsonBody,send,topics:seed}))return true;
     const topics=await approvedTopics(pool,seed);
+    if(await storyCatalogRoute(req,res,{actor,path,pool,topics,body:jsonBody,send,api}))return true;
     if(path.pathname==='/api/fg/topics'&&req.method==='GET'){send(res,{topics});return true;}
     if(path.pathname==='/api/fg/projects'&&req.method==='GET'){
       const {rows}=await pool.query(`SELECT p.id,p.name,p.user_id,p.status,f.topic_id,f.topic_snapshot,f.tier,f.group_name,f.budget_cny,p.updated_at,
         u.display_name owner_name,(SELECT count(*)::int FROM canvas_projects c WHERE c.project_id=p.id) canvas_count
-        FROM projects p JOIN users u ON u.id=p.user_id JOIN fg_story_projects f ON f.native_project_id=p.id ORDER BY p.updated_at DESC`);
+        FROM projects p JOIN users u ON u.id=p.user_id JOIN fg_story_projects f ON f.native_project_id=p.id WHERE p.fg_deleted_at IS NULL AND f.archived_at IS NULL ORDER BY p.updated_at DESC`);
       await bootstrapTeam(pool,actor,platform,platformCookie);
       const legacy=[];const groups=(await pool.query('SELECT id,name FROM fg_groups WHERE archived_at IS NULL ORDER BY created_at,id')).rows;
       send(res,{projects:rows,legacy,groups});return true;
@@ -57,20 +59,20 @@ export async function fgAPI(req,res,{actor,cookie,path,pool,web,platform,platfor
       if(!['S','A','B','C'].includes(body.tier)||!Number.isFinite(body.budgetCny)||body.budgetCny<0||body.budgetCny>10000000)throw new Error('请选择档位并填写有效预算');
       const group=String(body.groupName||'');
       if(group&&!(await pool.query('SELECT 1 FROM fg_groups WHERE name=$1 AND archived_at IS NULL',[group])).rowCount)throw new Error('请选择当前有效的小组');
-      const client=await pool.connect();
+      const client=await pool.connect();let createdProjectId;
       try{
-        await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',['fg-story:'+group+':'+topic.id]);
-        let link=(await client.query('SELECT * FROM fg_story_projects WHERE topic_id=$2 AND (user_id=$1 OR ($3<>\'\' AND group_name=$3)) ORDER BY created_at LIMIT 1',[actor.id,topic.id,group])).rows[0];
-        if(link?.native_project_id){send(res,{projectId:link.native_project_id,reused:true});await client.query('COMMIT');return true;}
-        const hex=createHash('sha256').update(actor.id+':fg-topic:'+topic.id).digest('hex');
-        const marker=link?.id||`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`;
+        await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',['fg-story:'+topic.id]);
+        if((await client.query('SELECT 1 FROM fg_topic_overrides WHERE topic_id=$1 AND deleted_at IS NOT NULL',[topic.id])).rowCount)throw Error('选题已删除，请刷新故事库');
+        const link=(await client.query('SELECT native_project_id FROM fg_story_projects WHERE topic_id=$1 AND archived_at IS NULL',[topic.id])).rows[0];
+        if(link){await client.query('ROLLBACK');send(res,'故事已被选用，请到制作项目中协作',409);return true;}
+        const marker=randomUUID();
         const description=`[FG-STORY:${marker}]\n选题 #${topic.id} ${topic.title}\n原型：${topic.original||'待补充'}\n人物：${topic.characters||topic.original}\n故事梗概：${topic.plot}\n核心冲突：${topic.conflict||topic.plot}\n风格：${topic.style}\n目标市场：${topic.markets}\n选题人：${topic.selected_by||'未指定'} / 原选择小组：${topic.selection_group||'未指定'}\n项目档位：${body.tier} / 制作小组：${group||'待分组'}\n版权状态：${topic.source_rights||'待核验'}`;
-        const recovered=(await client.query('SELECT id FROM projects WHERE user_id=$1 AND description LIKE $2',[actor.id,`[FG-STORY:${marker}]%`])).rows[0];
-        const project=recovered|| (await api('/projects','POST',{name:topic.title,type:'short-drama',aspectRatio:'9:16',sourceType:'text',description})).project;
+        const project=(await api('/projects','POST',{name:topic.title,type:'short-drama',aspectRatio:'9:16',sourceType:'text',description})).project;
+        createdProjectId=project.id;
         await client.query(`INSERT INTO fg_story_projects(id,user_id,topic_id,native_project_id,topic_snapshot,tier,group_name,budget_cny)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(user_id,topic_id) DO UPDATE SET native_project_id=excluded.native_project_id`,[marker,actor.id,topic.id,project.id,JSON.stringify(topic),body.tier,group,body.budgetCny]);
-        await client.query('COMMIT');send(res,{projectId:project.id,reused:false});return true;
-      }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[marker,actor.id,topic.id,project.id,JSON.stringify(topic),body.tier,group,body.budgetCny]);
+        await client.query('COMMIT');createdProjectId=undefined;send(res,{projectId:project.id,reused:false});return true;
+      }catch(e){await client.query('ROLLBACK');if(createdProjectId){try{await api('/projects/'+createdProjectId,'DELETE');}catch{console.error(JSON.stringify({event:'fg_story_creation_compensation_required',projectId:createdProjectId}));}}throw e;}finally{client.release();}
     }
     if(path.pathname==='/api/fg/finance'&&req.method==='GET'){
       // Every provider attempt stays separate. Polls/downloads are not a second charge.

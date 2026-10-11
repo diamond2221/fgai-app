@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.2";
+export const CURRENT_RELEASE_VERSION = "1.3.3";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,18 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月11日",
+        items: [
+            { type: "修复", content: "修复共享故事项目与短剧删除失败。项目先归档至 NAS recycle，保留费用和素材历史，删除后故事可重新立项。" },
+            { type: "调整", content: "故事库按真实立项显示已选、未选，移除预填人员与小组；已选故事禁止重复立项。管理员可编辑、删除故事及制作项目。" },
+            { type: "新增", content: "制作项目支持按级别、小组、负责人筛选；短剧列表区分自由短剧与共享故事，管理员可按普通用户名查看和管理私人短剧。" },
+            { type: "修复", content: "小说与综合工作台通过受保护的工程归档接口移动至同一 NAS 挂载内的 recycle，校验完整文件后移除原目录；素材库与公司素材库增加删除归档。" },
+            { type: "优化", content: "WeToken 自动同步详细用量；文本请求编号不同时，按模型、完整输入输出与缓存用量、完成时间进行双向唯一核对，保留证据和人工处理记录。" },
+            { type: "说明", content: "管理员之间的私人内容继续隔离，共享故事对团队开放；没有可靠费用证据的记录保留待核对，不使用估算金额核销。" },
+        ],
+    },
+    {
+        version: "1.3.2",
         date: "2026年10月11日",
         items: [
             { type: "修复", content: "广告助手兼容结构化联合结果，保留草稿中的工具引用；失败步骤实时显示终态，预算不足时给出明确原因。" },

@@ -3,7 +3,7 @@ import { DeleteButton } from "@/components/ui/base/buttons/delete-button";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { MediaPlaceholder } from "@/components/ui/product/media-placeholder";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Form, Input, Modal } from "antd";
 import { ArrowRight, BookOpenText, FileText, FolderKanban, Images, LayoutGrid, Palette, Plus, Search, Sparkles } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -23,6 +23,8 @@ import { createProject, deleteProject, importProjectUnits, listProjects, type Pr
 import { modelDisplayName, useEffectiveConfig } from "@/stores/use-config-store";
 
 import { sourceTypeLabel } from "./detail/shared";
+import {getFGTeam} from '@/services/api/fg-production';
+import {fgWorkspaceBasePath} from '@/lib/fg-entry-url';
 import { Select } from "@/components/ui/base/select";
 
 type ProjectForm = { name: string; aspectRatio: string; sourceType: string };
@@ -35,6 +37,10 @@ export default function ProjectsPage() {
     const [createForm] = Form.useForm<ProjectForm>();
     const [searchParams, setSearchParams] = useSearchParams();
     const [keyword, setKeyword] = useState("");
+    const fgManaged=!!fgWorkspaceBasePath(window.location.pathname);
+    const team=useQuery({queryKey:['fg-team'],queryFn:()=>getFGTeam(),enabled:fgManaged});
+    const [sourceFilter,setSourceFilter]=useState('all');
+    const [ownerFilter,setOwnerFilter]=useState('own');
     const [status, setStatus] = useState<"all" | "active" | "archived">("all");
     const [sort, setSort] = useState<"updated" | "progress" | "name">("updated");
     const [storyDraft, setStoryDraft] = useState("");
@@ -162,6 +168,8 @@ export default function ProjectsPage() {
     const rows = useMemo(() => {
         const normalizedKeyword = keyword.trim().toLowerCase();
         return [...allProjects]
+            .filter(row=>!fgManaged||(sourceFilter==='all'||(sourceFilter==='story'?row.fgShared:!row.fgShared)))
+            .filter(row=>!fgManaged||row.fgShared||!team.data||(ownerFilter==='all'||row.project.userId===(ownerFilter==='own'?team.data.currentUserId:ownerFilter)))
             .filter(({ project }) => status === "all" || project.status === status)
             .filter(({ project }) => !normalizedKeyword || `${project.name} ${project.description} ${project.stylePresetId} ${parseStyleProfile(project.styleProfileJson)?.title || resolveCanvasStylePreset(project.stylePresetId)?.title || ""}`.toLowerCase().includes(normalizedKeyword))
             .sort((left, right) => {
@@ -169,7 +177,7 @@ export default function ProjectsPage() {
                 if (sort === "progress") return projectSummaryCompletion(right) - projectSummaryCompletion(left);
                 return right.project.updatedAt.localeCompare(left.project.updatedAt);
             });
-    }, [allProjects, keyword, sort, status]);
+    }, [allProjects, keyword, sort, status,fgManaged,sourceFilter,ownerFilter,team.data]);
     const totalProjectCount = query.data?.pages[0]?.total ?? allProjects.length;
     useEffect(() => {
         const node = loadMoreRef.current;
@@ -242,7 +250,9 @@ export default function ProjectsPage() {
                 </div>
                 </details>
             </details>
-            <CollectionToolbar active={Boolean(keyword || status !== "all" || sort !== "updated")} onReset={() => { setKeyword(""); setStatus("all"); setSort("updated"); }}>
+            <CollectionToolbar active={Boolean(keyword || status !== "all" || sort !== "updated" || sourceFilter!=='all' || ownerFilter!=='own')} onReset={() => { setKeyword(""); setStatus("all"); setSort("updated");setSourceFilter('all');setOwnerFilter('own'); }}>
+                {fgManaged&&<Select className="w-40" aria-label="短剧来源" value={sourceFilter} onChange={setSourceFilter} options={[{value:'all',label:'全部短剧'},{value:'free',label:'自由短剧'},{value:'story',label:'故事与项目'}]}/>}
+                {fgManaged&&team.data?.canManage&&sourceFilter!=='story'&&<Select className="w-40" aria-label="自由短剧所属用户" value={ownerFilter} onChange={setOwnerFilter} options={[{value:'own',label:'我自己的短剧'},{value:'all',label:'我的与用户短剧'},...team.data.users.filter(u=>['user','member'].includes(u.platform_role)).map(u=>({value:u.id,label:u.display_name}))]}/>}
                 <Input allowClear className="app-list-search" prefix={<Search className="size-4 text-foreground/40" />} value={keyword} placeholder="搜索项目、简介或画风" onChange={(event) => setKeyword(event.target.value)} />
                 <Select className="w-32" value={status} onChange={setStatus} options={[{ label: "全部状态", value: "all" }, { label: "进行中", value: "active" }, { label: "已归档", value: "archived" }]} />
                 <Select className="w-32" value={sort} onChange={setSort} options={[{ label: "最近更新", value: "updated" }, { label: "章节进度", value: "progress" }, { label: "项目名称", value: "name" }]} />
@@ -258,7 +268,7 @@ export default function ProjectsPage() {
             {!query.isLoading && !hasInitialError ? <div ref={loadMoreRef} className="library-load-more" aria-live="polite">
                 {query.isFetchingNextPage ? "正在加载更多项目…" : query.isError ? <button type="button" onClick={() => void query.fetchNextPage()}>加载更多失败，点击重试</button> : query.hasNextPage ? "继续下滑加载更多（每页 50 条）" : allProjects.length ? `已加载全部 ${totalProjectCount} 个项目` : null}
             </div> : null}
-            {!query.isLoading && !rows.length && !hasInitialError && (keyword || status !== "all") ? (
+            {!query.isLoading && !rows.length && !hasInitialError && (keyword || status !== "all" || sourceFilter!=='all' || ownerFilter!=='own') ? (
                 <WorkspaceState
                     icon="projects"
                     title={keyword || status !== "all" ? "没有匹配的项目" : "创建第一个故事项目"}
@@ -371,7 +381,7 @@ function ProjectRow({ row, onDelete }: { row: ProjectSummary; onDelete: () => Pr
                 <span className="project-library-cover-scrim" />
                 <span className="project-library-cover-ratio">{row.project.aspectRatio}</span>
                 <span className="project-library-cover-stage">{stage.label}</span>
-                <span className="project-collection-delete"><DeleteButton label={`删除项目 ${row.project.name}`} description="项目章节、画布关联和素材归属将一并移除；独立画布与素材库原始素材会保留。此操作不可撤销。" onConfirm={onDelete} /></span>
+                {row.canDelete!==false&&<span className="project-collection-delete"><DeleteButton label={`删除项目 ${row.project.name}`} description="完整工程先归档到 NAS recycle/projects，再从工作区移除。故事项目删除后开放重新立项；共用素材与已发生费用保留。" onConfirm={onDelete} /></span>}
             </span>
             <span className="project-library-body">
                 <span className="project-library-heading"><strong title={row.project.name}>{row.project.name}</strong>{row.project.status === "archived" ? <em>已归档</em> : null}<ArrowRight className="project-library-arrow size-4" /></span>

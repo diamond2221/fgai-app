@@ -80,7 +80,7 @@ export async function teamAndStoryAPI(req,res,ctx,{body,send,topics}){
   if(p==='/api/fg/team'&&req.method==='GET'){
    const groups=(await pool.query(`SELECT g.*,count(m.id)::int member_count FROM fg_groups g LEFT JOIN fg_memberships m ON m.group_id=g.id AND m.unassigned_at IS NULL WHERE g.archived_at IS NULL GROUP BY g.id ORDER BY g.created_at,g.name`)).rows;
    const users=(await pool.query(`SELECT u.id,u.display_name,a.email,a.platform_role,m.group_id,m.role group_role,g.name group_name FROM users u JOIN fg_accounts a ON a.user_id=u.id LEFT JOIN fg_memberships m ON m.user_id=u.id AND m.unassigned_at IS NULL LEFT JOIN fg_groups g ON g.id=m.group_id AND g.archived_at IS NULL ORDER BY u.display_name,u.id`)).rows;
-   send(res,{groups,users,canManage:canReview(actor),currentGroup:users.find(u=>u.id===actor.id)?.group_id||null});return true;
+   send(res,{groups,users,canManage:canReview(actor),currentUserId:actor.id,currentGroup:users.find(u=>u.id===actor.id)?.group_id||null});return true;
   }
   if(!canReview(actor)){send(res,'仅超级管理员可管理制作小组',403);return true;}
   const input=await body(req);
@@ -133,5 +133,11 @@ export async function teamAndStoryAPI(req,res,ctx,{body,send,topics}){
 
 export async function approvedTopics(pool,seed){
  const submitted=(await pool.query("SELECT id,snapshot FROM fg_stories WHERE status='approved' ORDER BY id")).rows.map(r=>({...r.snapshot,id:r.id}));
- return [...seed,...submitted];
+ const overrides=new Map((await pool.query('SELECT * FROM fg_topic_overrides')).rows.map(r=>[r.topic_id,r]));
+ const claims=new Map((await pool.query(`SELECT f.topic_id,f.native_project_id,f.group_name,u.display_name FROM fg_story_projects f JOIN projects p ON p.id=f.native_project_id AND p.fg_deleted_at IS NULL JOIN users u ON u.id=f.user_id WHERE f.archived_at IS NULL`)).rows.map(r=>[r.topic_id,r]));
+ return [...seed,...submitted].filter(t=>!overrides.get(t.id)?.deleted_at).map(t=>{
+  const override=overrides.get(t.id),claim=claims.get(t.id);
+  const {selected_by,selection_group,selected_by_email,selected_at,...story}=override?.snapshot||t;
+  return {...story,id:t.id,revision:override?.revision||0,selected:!!claim,selected_project_id:claim?.native_project_id,...(claim?{selected_by:claim.display_name,selection_group:claim.group_name}:{})};
+ });
 }

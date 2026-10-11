@@ -3,11 +3,13 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +23,67 @@ import (
 
 func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 	registerFGCompanyAssetRoutes(r, svc)
+	r.POST("/fg-project-files", func(c *gin.Context) {
+		secret := os.Getenv("CANVAS_FG_BUDGET_SECRET")
+		if secret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(c.GetHeader("X-FG-Archive-Secret"))) != 1 {
+			fail(c, 403, errors.New("工程归档未授权"))
+			return
+		}
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		var body struct {
+			Module    string          `json:"module"`
+			Action    string          `json:"action"`
+			Name      string          `json:"name"`
+			Operation string          `json:"operation"`
+			Record    json.RawMessage `json:"record"`
+		}
+		if err = c.ShouldBindJSON(&body); err != nil {
+			fail(c, 400, err)
+			return
+		}
+		id, err := svc.FGProjectFiles(user.ID, body.Module, body.Action, body.Name, body.Operation, body.Record)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"operation": id})
+	})
+	r.POST("/fg-story-archive", func(c *gin.Context) {
+		secret := os.Getenv("CANVAS_FG_BUDGET_SECRET")
+		if secret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(c.GetHeader("X-FG-Archive-Secret"))) != 1 {
+			fail(c, 403, errors.New("故事归档未授权"))
+			return
+		}
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		if user.Role != model.UserRoleAdmin {
+			fail(c, 403, errors.New("仅管理员可归档故事"))
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 100000)
+		var body struct {
+			ID       int             `json:"id"`
+			Revision int64           `json:"revision"`
+			Snapshot json.RawMessage `json:"snapshot"`
+		}
+		if err = c.ShouldBindJSON(&body); err != nil {
+			fail(c, 400, err)
+			return
+		}
+		if err = svc.FGArchiveStory(user.ID, body.ID, body.Revision, body.Snapshot); err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"archived": true})
+	})
 	r.POST("/resources/access", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
-import {archiveDirectory} from './fg-recycle.mjs';
+import {archiveDirectory,restoreDirectory} from './fg-recycle.mjs';
 
 const marker='FG private creator workspace\n';
 function inside(root,target){return target.startsWith(root+path.sep);}
@@ -40,7 +40,7 @@ export function purgeProjects(db,root,ids,recycle='/fg-recycle'){
    results.push({id:row.id,name:row.name});
   }
  }).immediate();}catch(error){
-  for(const entry of archived)fs.cpSync(entry.destination,entry.source,{recursive:true,dereference:false,verbatimSymlinks:true});
+  for(const entry of archived)restoreDirectory(entry.source,entry.destination);
   throw error;
  }
  return results;

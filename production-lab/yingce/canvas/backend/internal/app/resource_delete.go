@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -185,6 +186,19 @@ func (s *Service) deleteUserAssetsWithResources(userID string, ids []string, pur
 		physicalObjects[resourceStorageIdentity(resource)] = resource
 	}
 	deletionJobs := resourceDeletionJobs(userID, physicalObjects)
+	if os.Getenv("CANVAS_FG_TEAM_WORKSPACE") == "true" {
+		for _, asset := range assetRecords {
+			data, e := json.Marshal(map[string]any{"asset": asset, "versions": versions, "representations": representations, "resources": resources, "deletionJobs": deletionJobs})
+			if e != nil {
+				return e
+			}
+			// The asset revision supplies a stable recovery identity. Outbox jobs
+			// remain durable if a later physical resource move cannot complete.
+			if e = writeFGArchive(os.Getenv("CANVAS_FG_NAS_ROOT"), "assets", userID, asset.ID, time.Now().UnixNano(), data); e != nil {
+				return WrapAppError(503, "NAS 素材归档未完成，素材仍保留", e)
+			}
+		}
+	}
 	// 业务记录和 Outbox 必须在同一事务提交。事务失败时物理文件完全不动；
 	// 提交成功后由幂等 worker 清理，进程退出或对象存储暂时失败都可继续重试。
 	if err := s.repo.DeleteAssetsAndResources(userID, assetIDs, ownedIDs, deletionJobs, deleteReferencedResources); err != nil {
@@ -362,6 +376,9 @@ func (s *Service) deleteLocalResourceObject(objectKey string) error {
 	resolvedRelative, err := filepath.Rel(resolvedRoot, resolvedTarget)
 	if err != nil || resolvedRelative == "." || resolvedRelative == ".." || strings.HasPrefix(resolvedRelative, ".."+string(filepath.Separator)) {
 		return errors.New("本地资源真实路径超出允许目录")
+	}
+	if os.Getenv("CANVAS_FG_TEAM_WORKSPACE") == "true" {
+		return s.recycleFGResource(objectKey, relative, target)
 	}
 	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("删除服务器本地文件失败：%w", err)

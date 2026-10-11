@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
-	"yingce/backend/internal/database"
-	"yingce/backend/internal/model"
-	"yingce/backend/internal/repository"
 	"os"
 	"path/filepath"
 	"testing"
+	"yingce/backend/internal/database"
+	"yingce/backend/internal/model"
+	"yingce/backend/internal/repository"
 )
 
 func TestFGCompanyPurgeAuthorizationRevisionAndSharedFiles(t *testing.T) {
@@ -21,7 +21,15 @@ func TestFGCompanyPurgeAuthorizationRevisionAndSharedFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			repo := repository.New(db)
-			root := t.TempDir()
+			nas := t.TempDir()
+			root := filepath.Join(nas, "media")
+			t.Setenv("CANVAS_FG_NAS_ROOT", nas)
+			if err := os.MkdirAll(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".fg-studio-nas-ready"), []byte("ready"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			svc := New(repo, root)
 			svc.BeginDrain()
 			admin := &model.User{ID: "publisher", Role: model.UserRoleAdmin}
@@ -79,6 +87,10 @@ func TestFGCompanyPurgeAuthorizationRevisionAndSharedFiles(t *testing.T) {
 			} else {
 				if !os.IsNotExist(fileErr) {
 					t.Fatal("unreferenced file remains", fileErr)
+				}
+				files, _ := filepath.Glob(filepath.Join(nas, "recycle", "resources", "*.bin"))
+				if len(files) != 1 {
+					t.Fatal("missing resource archive", files)
 				}
 			}
 			if _, err = repo.FGCompanyAsset(item.ID); !errors.Is(err, gorm.ErrRecordNotFound) {

@@ -5,7 +5,7 @@ import {AppModal} from '@/components/ui/product/app-modal';
 import {submitFGStory,resubmitFGStory,reviewFGStory,type FGTopic,type FGStory} from '@/services/api/fg-production';
 
 export function StoryDetails({story,onClose,onProject}:{story:FGTopic|null;onClose:()=>void;onProject:(s:FGTopic)=>void}){
- return <AppModal open={!!story} onCancel={onClose} title={story?.title} width={760} footer={<Button type="primary" disabled={story?.blocked} onClick={()=>story&&onProject(story)}>以此建立项目</Button>}>
+ return <AppModal open={!!story} onCancel={onClose} title={story?.title} width={760} footer={<Button type="primary" disabled={story?.blocked||story?.selected} onClick={()=>story&&onProject(story)}>{story?.selected?'已选用 · 请到制作项目协作':'以此建立项目'}</Button>}>
   {story&&<dl className="fg-story-details">{[['原作与人物原型',story.original],['主要人物',story.characters],['故事梗概',story.plot],['现代冲突与改编方向',story.conflict],['视觉风格',story.style],['制作形式',story.form],['市场与发行',[story.markets,story.language,story.channel].filter(Boolean).join(' · ')],['来源备注',story.source_rights]].map(([label,value])=>value?<div key={label}><dt>{label}</dt><dd>{value}</dd></div>:null)}</dl>}
  </AppModal>;
 }

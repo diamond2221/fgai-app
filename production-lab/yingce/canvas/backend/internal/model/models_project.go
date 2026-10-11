@@ -224,6 +224,7 @@ type Project struct {
 	Revision          int64         `json:"revision"`
 	CreatedAt         time.Time     `json:"createdAt"`
 	UpdatedAt         time.Time     `json:"updatedAt" gorm:"index"`
+	FGDeletedAt       *time.Time    `json:"-" gorm:"index"`
 }
 
 // StyleProfile 是用户可持续编辑的风格源；项目只保存应用当时的 JSON 快照，避免源对象更新污染历史生成。

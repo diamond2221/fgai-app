@@ -66,6 +66,13 @@ func (s *Service) archiveFGCanvas(bundle repository.FGCanvasRecycleArchive) erro
 }
 
 func writeFGCanvasArchive(root, owner, id string, revision int64, data []byte) error {
+	return writeFGArchive(root, "canvases", owner, id, revision, data)
+}
+
+func writeFGArchive(root, collection, owner, id string, revision int64, data []byte) error {
+	if root == "" {
+		return errors.New("NAS 回收目录尚未配置，原内容仍保留")
+	}
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -79,7 +86,7 @@ func writeFGCanvasArchive(root, owner, id string, revision int64, data []byte) e
 		return errors.New("NAS 尚未就绪，画布仍保留在回收站")
 	}
 	current := root
-	for _, part := range []string{"recycle", "canvases"} {
+	for _, part := range []string{"recycle", collection} {
 		current = filepath.Join(current, part)
 		if err := os.Mkdir(current, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return err

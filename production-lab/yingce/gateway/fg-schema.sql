@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS fg_story_projects(
   group_name varchar(80) NOT NULL DEFAULT '', budget_cny numeric(16,2) NOT NULL CHECK(budget_cny>=0),
   created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(user_id,topic_id)
 );
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS fg_deleted_at timestamptz;
+ALTER TABLE fg_story_projects ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+ALTER TABLE fg_story_projects DROP CONSTRAINT IF EXISTS fg_story_projects_user_id_topic_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS fg_story_active_topic ON fg_story_projects(topic_id) WHERE archived_at IS NULL;
+CREATE TABLE IF NOT EXISTS fg_topic_overrides(topic_id integer PRIMARY KEY,snapshot jsonb NOT NULL,revision integer NOT NULL DEFAULT 1,deleted_at timestamptz,updated_by varchar(36) NOT NULL REFERENCES users(id),updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS fg_fee_imports(id uuid PRIMARY KEY,actor_id varchar(36) NOT NULL REFERENCES users(id),sha256 varchar(64) NOT NULL UNIQUE,row_count integer NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS fg_provider_fees(
   reference_id varchar(160) PRIMARY KEY, model varchar(120) NOT NULL, usd numeric(24,10) NOT NULL CHECK(usd>=0),
@@ -55,4 +60,17 @@ CREATE OR REPLACE VIEW fg_fee_matches AS
  GROUP BY f.reference_id HAVING count(*)=1
  ), manual AS (SELECT reference_id,call_id FROM fg_fee_decisions WHERE classification='matched')
  SELECT a.reference_id,a.call_id,'automatic'::text method FROM automatic a WHERE NOT EXISTS(SELECT 1 FROM manual m WHERE m.call_id=a.call_id)
+ UNION ALL SELECT reference_id,call_id,'manual'::text FROM manual;
+CREATE TABLE IF NOT EXISTS fg_fee_usage_matches(reference_id varchar(160) PRIMARY KEY REFERENCES fg_provider_fees(reference_id),call_id varchar(36) UNIQUE NOT NULL REFERENCES api_call_logs(id),evidence jsonb NOT NULL,actor_id varchar(36) NOT NULL REFERENCES users(id),created_at timestamptz NOT NULL DEFAULT now());
+CREATE OR REPLACE VIEW fg_fee_matches AS
+ WITH exact AS (
+ SELECT f.reference_id,min(c.id) call_id FROM fg_provider_fees f JOIN api_call_logs c ON c.billable AND c.model=f.model AND c.channel_id IN(SELECT id FROM model_channels WHERE name LIKE 'WeToken%')
+ AND(c.fg_fee_reference_id=f.reference_id OR c.fg_fee_references_json::jsonb ? f.reference_id OR(c.capability='video' AND c.provider_request_id=f.reference_id))
+ WHERE NOT EXISTS(SELECT 1 FROM fg_fee_decisions d WHERE d.reference_id=f.reference_id)
+ GROUP BY f.reference_id HAVING count(*)=1
+ ), manual AS (SELECT reference_id,call_id FROM fg_fee_decisions WHERE classification='matched'), candidates AS (
+ SELECT reference_id,call_id,'automatic'::text method FROM exact
+ UNION ALL SELECT u.reference_id,u.call_id,'automatic_usage'::text FROM fg_fee_usage_matches u WHERE NOT EXISTS(SELECT 1 FROM exact e WHERE e.reference_id=u.reference_id OR e.call_id=u.call_id)
+ ), automatic AS (SELECT c.* FROM candidates c WHERE NOT EXISTS(SELECT 1 FROM fg_fee_decisions d WHERE d.reference_id=c.reference_id) AND NOT EXISTS(SELECT 1 FROM manual m WHERE m.call_id=c.call_id))
+ SELECT a.reference_id,a.call_id,a.method FROM automatic a WHERE (SELECT count(*) FROM automatic x WHERE x.call_id=a.call_id)=1
  UNION ALL SELECT reference_id,call_id,'manual'::text FROM manual;

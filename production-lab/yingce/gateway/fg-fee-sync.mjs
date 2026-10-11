@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import {importFeeCsv} from './fg-fee-import.mjs';
+import {readUsageLog,reconcileUsage} from './fg-fee-usage.mjs';
 
 const endpoint='https://wetoken.ai/api/user/v2/fee-log';
 const csvCell=value=>'"'+String(value).replaceAll('"','""')+'"';
@@ -52,7 +53,9 @@ export function startFeeSync(pool,{file=process.env.WETOKEN_FEE_SESSION_FILE,act
    const end=Math.floor(Date.now()/1000),start=Math.max(0,(prior.lastSuccess?Math.floor(Date.parse(prior.lastSuccess)/1000):end-31*86400)-2*86400);
    const entries=await readFeeLog(session,{start,end}),csv=feeLogCsv(entries);
    const imported=csv?await importFeeCsv(pool,actorId,csv):{rows:0,reused:false};
-   await save({mode:'session',automatic:true,status:'synced',intervalSeconds:60,lastSuccess:new Date().toISOString(),fetchedRows:entries.length,reason:'每分钟只读同步；供应商出账后按 Reference ID 精确核销。',importedRows:imported.rows});
+   const usage=await readUsageLog(session,{start,end});
+   const matched=usage.length?await reconcileUsage(pool,actorId,usage):[];
+   await save({mode:'session',automatic:true,status:'synced',intervalSeconds:60,lastSuccess:new Date().toISOString(),fetchedRows:entries.length,reason:'每分钟同步；优先按流水编号核销，编号不同的文本请求仅在模型、完整用量和完成时间双向唯一吻合时核销。',importedRows:imported.rows,usageMatchedRows:matched.length});
   }catch(error){
    const expired=['SESSION_EXPIRED','INVALID_SESSION'].includes(error.message);
    if(expired)paused=true;

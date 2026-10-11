@@ -3,6 +3,8 @@ package app
 import (
 	"errors"
 	"gorm.io/gorm"
+	"os"
+	"path/filepath"
 	"testing"
 	"yingce/backend/internal/model"
 )
@@ -10,6 +12,14 @@ import (
 func TestFGSuperadminIsolationAndMemberManagement(t *testing.T) {
 	t.Setenv("CANVAS_FG_TEAM_WORKSPACE", "true")
 	service, db := newProjectDeleteTestService(t)
+	root := t.TempDir()
+	t.Setenv("CANVAS_FG_NAS_ROOT", root)
+	if err := os.Mkdir(filepath.Join(root, "media"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "media", ".fg-studio-nas-ready"), []byte("ready"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	for _, sql := range []string{
 		"CREATE TABLE fg_accounts(user_id TEXT PRIMARY KEY,platform_role TEXT)",
 		"INSERT INTO fg_accounts VALUES('admin','superadmin'),('alice','superadmin'),('bob','member')",
@@ -44,14 +54,15 @@ func TestFGSuperadminIsolationAndMemberManagement(t *testing.T) {
 	if _, err := service.repo.ProjectForUser("bob", project.ID); err != nil {
 		t.Fatal("member cannot read shared story project", err)
 	}
-	if err := service.DeleteProject("admin", project.ID); err == nil {
-		t.Fatal("admin deleted another owner's shared project")
+	if err := service.DeleteProject("bob", project.ID); err == nil {
+		t.Fatal("ordinary member deleted shared project")
 	}
-	if err := service.DeleteProject("alice", project.ID); err != nil {
-		t.Fatal("owner delete failed", err)
+	if err := service.DeleteProject("admin", project.ID); err != nil {
+		t.Fatal("admin cannot archive shared project", err)
 	}
-	if err := db.First(&model.Project{}, "id = ?", project.ID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatal("project was not removed", err)
+	var archived model.Project
+	if err := db.First(&archived, "id = ?", project.ID).Error; err != nil || archived.FGDeletedAt == nil {
+		t.Fatal("project aggregate not retained", err)
 	}
 	memberProject := model.Project{ID: "member-managed", UserID: "bob", Name: "member private", Status: model.ProjectStatusActive}
 	if err := db.Create(&memberProject).Error; err != nil {

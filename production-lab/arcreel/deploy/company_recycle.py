@@ -5,6 +5,26 @@ from pathlib import Path
 import shutil
 import sqlite3
 import uuid
+import json
+import urllib.request
+
+
+def broker_move(name, operation, action='archive'):
+    actor, capability = os.environ['FG_ARC_ACTOR'], os.environ['FG_ARC_CAPABILITY']
+    request = urllib.request.Request('http://fg-gateway:3010/internal/arcreel/' + actor + '/archive',
+        data=json.dumps({'name': name, 'operation': operation, 'action': action}).encode(),
+        headers={'Authorization': 'Bearer ' + capability, 'Content-Type': 'application/json'}, method='POST')
+    with urllib.request.urlopen(request, timeout=120) as response:
+        result = json.load(response)
+    if result.get('operation') != operation:
+        raise RuntimeError('NAS 工程归档尚未确认，原工程记录仍保留')
+
+
+def restore_archive(source, destination):
+    if os.environ.get('FG_ARC_ACTOR') and os.environ.get('FG_ARC_CAPABILITY'):
+        broker_move(Path(source).name, Path(destination).name, 'restore')
+    else:
+        shutil.copytree(destination, source, symlinks=True, dirs_exist_ok=True)
 
 
 def preflight_delete(database=Path('/state/arcreel.db'), recycle=Path('/fg-recycle')):
@@ -62,6 +82,10 @@ def archive_project(source, workspace=Path('/workspace'), recycle=Path('/fg-recy
     temporary = recycle / ('.pending-' + identity)
     destination = recycle / identity
     before = inventory(source)
+    if os.environ.get('FG_ARC_ACTOR') and os.environ.get('FG_ARC_CAPABILITY'):
+        operation = uuid.uuid4().hex
+        broker_move(source.name, operation)
+        return recycle / operation
     # The actor's media and archive use separate bind mounts, so rename alone
     # returns EXDEV. Verify a complete copy before removing the source tree.
     shutil.copytree(source, temporary, symlinks=True)
@@ -82,6 +106,6 @@ def install():
     from lib.project.project_manager import ProjectManager
 
     def delete(self, name):
-        archive_project(self.get_project_path(name))
+        return archive_project(self.get_project_path(name))
 
     ProjectManager.delete_project_directory = delete
