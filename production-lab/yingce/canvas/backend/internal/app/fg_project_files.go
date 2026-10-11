@@ -168,7 +168,16 @@ func (s *Service) recycleFGResource(objectKey, relative, target string) error {
 	if root == "" {
 		return errors.New("NAS 回收目录未配置，素材删除任务等待重试")
 	}
-	source := filepath.Join(root, "media", "resources", relative)
+	// /data is the existing media bind mount; production keeps native canvas
+	// data in /data/yingce. Move through the NAS root mount to avoid SMB unlink.
+	dataRelative, err := filepath.Rel(filepath.Join(root, "media"), s.dataDir)
+	if err != nil || dataRelative == ".." || strings.HasPrefix(dataRelative, ".."+string(filepath.Separator)) {
+		dataRelative, err = filepath.Rel("/data", s.dataDir)
+	}
+	if err != nil || dataRelative == ".." || strings.HasPrefix(dataRelative, ".."+string(filepath.Separator)) || filepath.IsAbs(dataRelative) {
+		return errors.New("NAS 素材数据目录不在 media 挂载内，文件仍保留")
+	}
+	source := filepath.Join(root, "media", dataRelative, "resources", relative)
 	if resolved, e := filepath.EvalSymlinks(source); e != nil || resolved != source {
 		return errors.New("NAS 素材真实路径无效，文件仍保留")
 	}

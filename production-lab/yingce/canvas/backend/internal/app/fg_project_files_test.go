@@ -92,3 +92,35 @@ func TestFGResourceDeleteArchivesBytesAndRequiresNAS(t *testing.T) {
 		t.Fatal("outbox retry is not idempotent", e)
 	}
 }
+
+func TestFGResourceDeleteUsesNestedCanvasDataDirectory(t *testing.T) {
+	t.Setenv("CANVAS_FG_TEAM_WORKSPACE", "true")
+	root := t.TempDir()
+	t.Setenv("CANVAS_FG_NAS_ROOT", root)
+	s, _ := newProjectDeleteTestService(t)
+	s.dataDir = filepath.Join(root, "media", "yingce")
+	resources := filepath.Join(s.dataDir, "resources", "users", "fixture")
+	if err := os.MkdirAll(resources, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "media", ".fg-studio-nas-ready"), []byte("ready"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(resources, "test.mp4")
+	if err := os.WriteFile(source, []byte("nested canvas media"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.deleteLocalResourceObject("users/fixture/test.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatal("original remained", err)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "recycle", "resources", "*.bin"))
+	if err != nil || len(files) != 1 {
+		t.Fatal(files, err)
+	}
+	if body, err := os.ReadFile(files[0]); err != nil || string(body) != "nested canvas media" {
+		t.Fatal("nested archive damaged", err)
+	}
+}
