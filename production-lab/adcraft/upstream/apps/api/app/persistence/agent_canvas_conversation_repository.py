@@ -3484,6 +3484,18 @@ class AgentCanvasConversationRepository:
                     AgentCanvasOperationEnvelopeRepository(self._database).create_in_transaction(
                         connection, envelope
                     )
+                    if isinstance(envelope, CapabilityCommandEnvelopeV2):
+                        from app.services.agent_canvas_capability_policy import CapabilityPolicyService
+                        policy = CapabilityPolicyService()
+                        definition = (policy.internal_script_checkpoint_definition()
+                                      if envelope.publication_kind == "internal_document"
+                                      else policy.definition(envelope.capability_id))
+                        _start_expert_activity_in_transaction(
+                            connection, self._events, turn_id=turn_id,
+                            capability_id=envelope.capability_id,
+                            operation=definition.operation, display_name=definition.display_name,
+                            now=now, event_details={"retry_of_turn_id": source.turn_id},
+                        )
                     AgentCanvasContinuationOutboxRepository(
                         self._database, self._events
                     ).enqueue_in_transaction(
@@ -4454,79 +4466,10 @@ class AgentCanvasConversationRepository:
         activity_id = _expert_activity_id(turn_id, capability_id, operation)
         try:
             with self._database.engine.begin() as connection:
-                turn = _require_turn(connection, turn_id)
-                existing = (
-                    connection.execute(
-                        select(AgentCanvasExpertActivityRow).where(
-                            AgentCanvasExpertActivityRow.activity_id == activity_id
-                        )
-                    )
-                    .mappings()
-                    .one_or_none()
-                )
-                if existing is not None:
-                    return _expert_activity(existing)
-                connection.execute(
-                    insert(AgentCanvasExpertActivityRow).values(
-                        activity_id=activity_id,
-                        turn_id=turn_id,
-                        workflow_id=str(turn["workflow_id"]),
-                        capability_id=capability_id,
-                        operation=operation,
-                        status="working",
-                        display_name=display_name,
-                        error_code=None,
-                        error_message=None,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-                self._events.append_in_transaction(
-                    connection,
-                    V2EventInsert(
-                        workflow_id=str(turn["workflow_id"]),
-                        event_type="expert_activity_started",
-                        created_at=now,
-                        payload={
-                            "activity_id": activity_id,
-                            "workflow_id": str(turn["workflow_id"]),
-                            "turn_id": turn_id,
-                            "capability_id": capability_id,
-                            "operation": operation,
-                            "capability_display_name": display_name,
-                            "status": "working",
-                            "conversation_id": str(turn["conversation_id"]),
-                            "created_at": now,
-                            **(event_details or {}),
-                        },
-                    ),
-                )
-                _append_timeline_entry(
-                    connection,
-                    conversation_id=str(turn["conversation_id"]),
-                    workflow_id=str(turn["workflow_id"]),
-                    entry_type="expert_activity",
-                    content=display_name,
-                    metadata=build_presentation_metadata(
-                        message_key="expert_activity.working",
-                        message_args={"capability_display_name": display_name},
-                        response_locale=_guidance_response_locale(
-                            connection,
-                            str(turn["workflow_id"]),
-                        ),
-                        presentation_key=f"activity:{activity_id}",
-                        base={
-                            "activity_id": activity_id,
-                            "capability_id": capability_id,
-                            "operation": operation,
-                            "capability_display_name": display_name,
-                            "status": "working",
-                            "conversation_id": str(turn["conversation_id"]),
-                            "created_at": now,
-                            **(event_details or {}),
-                        },
-                    ),
-                    created_at=now,
+                _start_expert_activity_in_transaction(
+                    connection, self._events, turn_id=turn_id,
+                    capability_id=capability_id, operation=operation,
+                    display_name=display_name, now=now, event_details=event_details,
                 )
         except SQLAlchemyError as error:
             raise _error(
@@ -5783,6 +5726,95 @@ def _expert_activity(row: RowMapping) -> ExpertActivityV2:
         error_message=str(row["error_message"]) if row["error_message"] else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+    )
+
+
+def _start_expert_activity_in_transaction(
+    connection: Connection,
+    events: EventRepository,
+    *,
+    turn_id: str,
+    capability_id: str,
+    operation: str,
+    display_name: str,
+    now: str,
+    event_details: Mapping[str, object] | None = None,
+) -> None:
+    """Create activity, event and timeline before the caller publishes work."""
+    activity_id = _expert_activity_id(turn_id, capability_id, operation)
+    turn = _require_turn(connection, turn_id)
+    existing = (
+        connection.execute(
+            select(AgentCanvasExpertActivityRow).where(
+                AgentCanvasExpertActivityRow.activity_id == activity_id
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if existing is not None:
+        return
+    connection.execute(
+        insert(AgentCanvasExpertActivityRow).values(
+            activity_id=activity_id,
+            turn_id=turn_id,
+            workflow_id=str(turn["workflow_id"]),
+            capability_id=capability_id,
+            operation=operation,
+            status="working",
+            display_name=display_name,
+            error_code=None,
+            error_message=None,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    events.append_in_transaction(
+        connection,
+        V2EventInsert(
+            workflow_id=str(turn["workflow_id"]),
+            event_type="expert_activity_started",
+            created_at=now,
+            payload={
+                "activity_id": activity_id,
+                "workflow_id": str(turn["workflow_id"]),
+                "turn_id": turn_id,
+                "capability_id": capability_id,
+                "operation": operation,
+                "capability_display_name": display_name,
+                "status": "working",
+                "conversation_id": str(turn["conversation_id"]),
+                "created_at": now,
+                **(event_details or {}),
+            },
+        ),
+    )
+    _append_timeline_entry(
+        connection,
+        conversation_id=str(turn["conversation_id"]),
+        workflow_id=str(turn["workflow_id"]),
+        entry_type="expert_activity",
+        content=display_name,
+        metadata=build_presentation_metadata(
+            message_key="expert_activity.working",
+            message_args={"capability_display_name": display_name},
+            response_locale=_guidance_response_locale(
+                connection,
+                str(turn["workflow_id"]),
+            ),
+            presentation_key=f"activity:{activity_id}",
+            base={
+                "activity_id": activity_id,
+                "capability_id": capability_id,
+                "operation": operation,
+                "capability_display_name": display_name,
+                "status": "working",
+                "conversation_id": str(turn["conversation_id"]),
+                "created_at": now,
+                **(event_details or {}),
+            },
+        ),
+        created_at=now,
     )
 
 
