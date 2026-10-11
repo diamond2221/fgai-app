@@ -66,12 +66,28 @@ export async function guardEditorWrite(req,res,{pool,actor,path}){
  try{
   await client.query('BEGIN');await client.query("SELECT pg_advisory_xact_lock(hashtext('fg-editor:'||$1))",[expected]);
   const row=(await client.query('SELECT * FROM fg_editor_leases WHERE resource_key=$1 FOR UPDATE',[expected])).rows[0];
-  // A list-page delete carries no editor token. The same account's open tab
-  // must not block its own deletion; another person's live lease still does.
-  const ownCanvasDelete=req.method==='DELETE'&&canvas&&path.pathname==='/api/canvas-projects/'+canvas[1]&&row?.actor_id===actor.id;
+  // A list-page delete carries no editor token. Administrators may manage
+  // ordinary users, but cannot override another administrator's private work.
+  const canvasDelete=req.method==='DELETE'&&canvas&&path.pathname==='/api/canvas-projects/'+canvas[1];
+  const ownCanvasDelete=canvasDelete&&row?.actor_id===actor.id;
+  const managedCanvasDelete=canvasDelete&&actor.reviewer&&await administratorCanDeleteMemberCanvas(client,actor,canvas[1]);
   if(row&&new Date(row.expires_at)>new Date()){
-   if(!ownCanvasDelete&&(supplied!==expected||!leaseTokenMatches(row,actor,expected,req.headers['x-fg-editor-token']))){await client.query('ROLLBACK');client.release();const holder=await holderName(pool,row.actor_id);send(res,409,{holder},holder+' 进入了这个画布，你已退出编辑。');return false;}
+   if(!ownCanvasDelete&&!managedCanvasDelete&&(supplied!==expected||!leaseTokenMatches(row,actor,expected,req.headers['x-fg-editor-token']))){await client.query('ROLLBACK');client.release();const holder=await holderName(pool,row.actor_id);send(res,409,{holder},holder+' 进入了这个画布，你已退出编辑。');return false;}
   }else if(supplied){await client.query('ROLLBACK');client.release();send(res,409,null,'编辑连接已过期，请重新打开画布');return false;}
-  let done=false;const release=()=>{if(done)return;done=true;void client.query('ROLLBACK').finally(()=>client.release());};res.once('finish',release);res.once('close',release);return true;
+  let done=false;
+  const release=async completed=>{
+   if(done)return;done=true;
+   try{
+    if(completed&&canvasDelete&&res.statusCode>=200&&res.statusCode<300){await client.query('DELETE FROM fg_editor_leases WHERE resource_key=$1',[expected]);await client.query('COMMIT');await notifyWatchers(pool,expected);}
+    else await client.query('ROLLBACK');
+   }catch{await client.query('ROLLBACK').catch(()=>{});}finally{client.release();}
+  };
+  res.once('finish',()=>void release(true));res.once('close',()=>void release(false));return true;
  }catch(e){await client.query('ROLLBACK');client.release();throw e;}
+}
+
+export async function administratorCanDeleteMemberCanvas(pool,actor,id){
+ if(!actor?.reviewer)return false;
+ const result=await pool.query("SELECT c.id FROM canvas_projects c JOIN fg_accounts owner ON owner.user_id=c.user_id JOIN fg_accounts manager ON manager.user_id=$2 WHERE c.id=$1 AND c.deleted_at IS NULL AND owner.platform_role IN ('user','member') AND manager.platform_role='superadmin'",[id,actor.id]);
+ return result.rows.length===1;
 }

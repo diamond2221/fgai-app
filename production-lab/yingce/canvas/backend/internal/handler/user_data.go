@@ -505,6 +505,31 @@ func RegisterUserDataRoutes(r *gin.RouterGroup, svc *service.Service) {
 		}
 		ok(c, gin.H{"id": c.Param("id")})
 	})
+	r.GET("/canvas-projects/recycle", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		rows, err := svc.FGRecycledCanvases(user.ID)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"projects": rows})
+	})
+	r.POST("/canvas-projects/:id/restore", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		if err := svc.FGRestoreCanvas(user.ID, c.Param("id")); err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"id": c.Param("id")})
+	})
 	r.GET("/canvas-projects", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {

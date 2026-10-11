@@ -364,8 +364,10 @@ func (s *Service) DeleteProject(userID string, id string) error {
 	if err != nil {
 		return err
 	}
-	if !s.repo.FGCanManageOwner(userID,project.UserID){return Forbidden("仅项目创建者或超级管理员可删除项目")}
-	userID=project.UserID
+	if !s.repo.FGCanManageOwner(userID, project.UserID) {
+		return Forbidden("仅创建者或有管理权限的管理员可删除项目")
+	}
+	userID = project.UserID
 	canvases, err := s.repo.ProjectCanvasDocuments(userID, id)
 	if err != nil {
 		return err

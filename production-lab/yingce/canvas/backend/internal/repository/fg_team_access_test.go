@@ -126,7 +126,7 @@ func TestFGSuperadminScopePreservesCanvasSaveStatement(t *testing.T) {
 	}
 	for _, sql := range []string{
 		"CREATE TABLE fg_accounts(user_id TEXT PRIMARY KEY,platform_role TEXT)",
-		"INSERT INTO fg_accounts VALUES('admin','superadmin'),('alice','member'),('bob','member')",
+		"INSERT INTO fg_accounts VALUES('admin','superadmin'),('alice','superadmin'),('bob','member')",
 		"CREATE TABLE fg_story_projects(native_project_id TEXT PRIMARY KEY)",
 		"CREATE TABLE fg_resource_grants(project_id TEXT,resource_id TEXT)",
 		"CREATE TABLE fg_company_assets(resource_id TEXT)",
@@ -227,6 +227,48 @@ func TestFGSuperadminScopePreservesCanvasSaveStatement(t *testing.T) {
 		if err != nil || total != 1 || len(rows) != 1 || rows[0].ID != storyCanvas.ID {
 			t.Fatal("story filter failed", actor, total, err)
 		}
+	}
+	memberCanvas := model.CanvasProject{ID: "member-canvas", UserID: "bob", PayloadJSON: `{"nodes":[]}`}
+	if err = repo.UpsertCanvasProject(&memberCanvas); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.CanvasProjectForUser("admin", memberCanvas.ID); err != nil {
+		t.Fatal("administrator cannot view ordinary user", err)
+	}
+	if !repo.FGCanManageOwner("admin", "bob") {
+		t.Fatal("administrator cannot manage member")
+	}
+	memberResource := model.Resource{ID: "member-resource", UserID: "bob", Status: model.ResourceStatusReady}
+	if err = db.Create(&memberResource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.ResourceForUser("admin", memberResource.ID); err != nil {
+		t.Fatal("member media unavailable to administrator", err)
+	}
+	memberRows, memberTotal, err := repo.UserCanvasProjectsPage("admin", 1, 40, "owner:bob", "", "")
+	if err != nil || memberTotal != 1 || len(memberRows) != 1 || memberRows[0].ID != memberCanvas.ID {
+		t.Fatal("owner filter failed", memberTotal, err)
+	}
+	if _, _, err = repo.UserCanvasProjectsPage("bob", 1, 40, "owner:admin", "", ""); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("member used admin owner filter", err)
+	}
+	if _, _, err = repo.UserCanvasProjectsPage("admin", 1, 40, "owner:alice", "", ""); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("administrator used other admin filter", err)
+	}
+	if err = db.Exec("UPDATE fg_accounts SET platform_role='superadmin' WHERE user_id='bob'").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.CanvasProjectForUser("admin", memberCanvas.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("promotion did not revoke other admin access", err)
+	}
+	if err = repo.DeleteCanvasProject("admin", memberCanvas.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("administrator deleted promoted admin canvas", err)
+	}
+	if err = db.Exec("UPDATE fg_accounts SET platform_role='member' WHERE user_id='bob'").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.DeleteCanvasProject("admin", memberCanvas.ID); err != nil {
+		t.Fatal("administrator cannot delete member canvas", err)
 	}
 }
 

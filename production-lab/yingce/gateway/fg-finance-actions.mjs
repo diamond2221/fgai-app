@@ -1,10 +1,11 @@
 import {randomUUID} from 'node:crypto';
+import {matchReceiptPairs} from './fg-finance-matching.mjs';
 import {spendUsage,monthStart,monthRange} from './fg-budgets.mjs';
 async function body(req){let chunks=[],n=0;for await(const c of req){n+=c.length;if(n>100000)throw Error('请求内容过大');chunks.push(c);}return JSON.parse(Buffer.concat(chunks));}
 function send(res,data,status=200){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify({code:status===200?0:status,data:status===200?data:null,msg:status===200?'':String(data)}));}
 export async function financeActions(req,res,{pool,actor,path}){
  const route=path.pathname;
- if(!['/api/fg/budgets/users','/api/fg/budgets/project','/api/fg/finance/decisions','/api/fg/finance/request-decisions','/api/fg/finance/audit'].includes(route))return false;
+ if(!['/api/fg/budgets/users','/api/fg/budgets/project','/api/fg/finance/decisions','/api/fg/finance/batch-matches','/api/fg/finance/request-decisions','/api/fg/finance/audit'].includes(route))return false;
  try{
   if(route==='/api/fg/budgets/users'&&req.method==='GET'){
    const range=monthRange(path.searchParams.get('month')||undefined),historical=range.month!==monthStart().slice(0,7);
@@ -34,6 +35,8 @@ export async function financeActions(req,res,{pool,actor,path}){
     const before=(await client.query('SELECT budget_cny FROM fg_story_projects WHERE native_project_id=$1',[input.projectId])).rows[0];if(!before)throw Error('请选择故事项目');
     await client.query('UPDATE fg_story_projects SET budget_cny=$2 WHERE native_project_id=$1',[input.projectId,limit]);
     await client.query('INSERT INTO fg_finance_audit(id,actor_id,action,target,before_value,after_value) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),actor.id,'project_budget',input.projectId,before,{budgetCny:limit}]);
+   }else if(route==='/api/fg/finance/batch-matches'&&req.method==='POST'){
+    await matchReceiptPairs(client,actor.id,input.pairs,input.note);
    }else if(route==='/api/fg/finance/request-decisions'&&req.method==='POST'){
     const note=String(input.note||'').trim();if(!['no_charge','reset'].includes(input.classification)||note.length<8||note.length>2000)throw Error('请填写至少 8 字的费用核查依据');
     const call=(await client.query("SELECT id,user_id FROM api_call_logs WHERE id=$1 AND billable AND channel_id IN(SELECT id FROM model_channels WHERE name LIKE 'WeToken%') FOR UPDATE",[input.callId])).rows[0];if(!call)throw Error('请选择有效制作请求');

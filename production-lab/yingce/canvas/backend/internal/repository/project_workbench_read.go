@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"gorm.io/gorm"
 	"strings"
 
 	"yingce/backend/internal/model"
@@ -173,7 +174,13 @@ func (r *Repository) UserCanvasProjectsPage(userID string, page int, pageSize in
 	var total int64
 	query := fgCanvasScope(r.db.Model(&model.CanvasProject{}), userID)
 	if projectID == "independent" {
-		query = query.Where("project_id = '' OR project_id IS NULL")
+		query = query.Where("user_id = ? AND (project_id = '' OR project_id IS NULL)", userID)
+	} else if strings.HasPrefix(projectID, "owner:") {
+		ownerID := strings.TrimPrefix(projectID, "owner:")
+		if !r.FGCanManageOwner(userID, ownerID) {
+			return []model.CanvasProject{}, 0, gorm.ErrRecordNotFound
+		}
+		query = query.Where("user_id = ? AND (project_id = '' OR project_id IS NULL)", ownerID)
 	} else if projectID == "stories" {
 		if fgTeamEnabled() {
 			query = query.Where("EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = canvas_projects.project_id)")

@@ -21,6 +21,41 @@ func TestCurrentSchemaVersionMatchesMigrationPlan(t *testing.T) {
 	}
 }
 
+func TestCanvasRecycleMigrationPreservesExistingDocuments(t *testing.T) {
+	db, err := Open(Config{Driver: "sqlite", DSN: "file:fg-canvas-recycle-migration?mode=memory&cache=shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = MigrateSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	before := model.CanvasProject{ID: "existing-canvas", UserID: "owner", Title: "已有画布", PayloadJSON: `{"nodes":[{"id":"existing-node"}]}`, Revision: 7}
+	if err = db.Create(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"deleted_at", "deleted_by"} {
+		if err = db.Migrator().DropColumn(&model.CanvasProject{}, column); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = db.Where("version = ?", 50).Delete(&schemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = MigrateSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var after model.CanvasProject
+	if err = db.First(&after, "id = ?", before.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.UserID != before.UserID || after.Title != before.Title || after.PayloadJSON != before.PayloadJSON || after.Revision != 7 || after.DeletedAt != nil || after.DeletedBy != "" {
+		t.Fatalf("migration changed existing document: %+v", after)
+	}
+	if err = MigrateSchema(db); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMigrateSchemaRecordsAndValidatesVersion(t *testing.T) {
 	db, err := Open(Config{Driver: "sqlite", DSN: "file:migration-version?mode=memory&cache=shared"})
 	if err != nil {

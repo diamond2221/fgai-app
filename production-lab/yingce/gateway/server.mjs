@@ -22,6 +22,7 @@ import { platformToken, trustedOrigin, publicResourceRead, publicCanvasShareRead
 import {publicEntryOrigins, workspaceRequestPath, workspaceEntryURL} from './fg-public-entry.mjs';
 import {initializeInspiration,startInspirationSync,inspirationRoute} from './fg-inspiration.mjs';
 import {registerSpeechStream} from './fg-speech-stream.mjs';
+import {canvasOwnersRoute} from './fg-canvas-owners.mjs';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 8 });
 const editorPool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 16 });
@@ -158,6 +159,7 @@ const server = http.createServer(async (req, res) => {
       const output=await fetch(new URL('/api'+p,web),{method:m,headers:{cookie:ownerCookie,origin:publicOrigin,...extra},body:payload,signal:AbortSignal.timeout(120000)});
       const envelope=await output.json();if(!output.ok||envelope.code!==0)throw Error(envelope.msg||'作品归档未完成');return envelope.data;
     }}))return;
+    if(await canvasOwnersRoute(req,res,{pool,actor,path}))return;
     if(await inspirationRoute(req,res,{pool,actor,path}))return;
     if(path.pathname==='/api/fg/music/status'&&req.method==='GET'){
       const status=await musicStatus();const registered=(await pool.query(`SELECT 1 FROM channel_models cm JOIN model_channels c ON c.id=cm.channel_id WHERE c.name='Suno 音乐 · FG' AND cm.model_key='suno-company-music' AND c.enabled AND cm.enabled AND c.deleted_at IS NULL AND cm.deleted_at IS NULL`)).rowCount>0;

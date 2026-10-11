@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 49
+const CurrentSchemaVersion int64 = 50
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -163,6 +163,16 @@ var schemaMigrations = []migration{
 	{version: 49, name: "banner_sort_order", checksum: "sha256:banner-sort-order-v49-20261010", apply: func(tx *gorm.DB) error {
 		if !tx.Migrator().HasColumn(&model.BannerAnnouncement{}, "SortOrder") {
 			return tx.Migrator().AddColumn(&model.BannerAnnouncement{}, "SortOrder")
+		}
+		return nil
+	}},
+	{version: 50, name: "fg_canvas_recycle", checksum: "sha256:fg-canvas-recycle-v50-20261011", apply: func(tx *gorm.DB) error {
+		for _, column := range []string{"DeletedAt", "DeletedBy"} {
+			if !tx.Migrator().HasColumn(&model.CanvasProject{}, column) {
+				if err := tx.Migrator().AddColumn(&model.CanvasProject{}, column); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	}},

@@ -143,7 +143,20 @@ func (r *Repository) DeleteCanvasProject(userID string, id string) error {
 			if !New(tx).FGCanManageOwner(userID, canvas.UserID) {
 				return gorm.ErrRecordNotFound
 			}
-			userID = canvas.UserID
+			// FG deletion is recoverable. Preserve the document, history and media
+			// references in one transaction; invalidate public share links immediately.
+			deletedAt := time.Now()
+			result := tx.Model(&model.CanvasProject{}).Where("id=? AND deleted_at IS NULL", id).Updates(map[string]any{"deleted_at": deletedAt, "deleted_by": userID, "revision": gorm.Expr("revision + 1")})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+			if err := tx.Where("project_id=?", id).Delete(&model.CanvasShare{}).Error; err != nil {
+				return err
+			}
+			return nil
 		}
 		// Serialize deletion with saves before reading the history IDs to remove.
 		if err := tx.Model(&model.CanvasProject{}).Where("user_id = ? AND id = ?", userID, id).UpdateColumn("revision", gorm.Expr("revision")).Error; err != nil {

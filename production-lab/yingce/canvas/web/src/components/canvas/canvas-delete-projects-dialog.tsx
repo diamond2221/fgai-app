@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { deleteCanvasProjectsWithRemoteSync } from "@/services/user-data-sync";
+import {useUserStore} from "@/stores/use-user-store";
 
 export function CanvasDeleteProjectsDialog() {
     const { message } = App.useApp();
@@ -12,6 +13,7 @@ export function CanvasDeleteProjectsDialog() {
     const removeSelectedIds = useCanvasUiStore((state) => state.removeSelectedProjectIds);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const [deleting, setDeleting] = useState(false);
+    const remote=useUserStore(state=>Boolean(state.user));
     const confirm = async () => {
         setDeleting(true);
         try {
@@ -28,7 +30,7 @@ export function CanvasDeleteProjectsDialog() {
 
     return (
         <Modal
-            title="删除画布？"
+            title={remote?"移入画布回收站？":"删除画布？"}
             open={ids.length > 0}
             centered
             onCancel={() => setDeleteIds([])}
@@ -36,12 +38,12 @@ export function CanvasDeleteProjectsDialog() {
                 <>
                     <Button onClick={() => setDeleteIds([])}>取消</Button>
                     <Button danger type="primary" loading={deleting} onClick={() => void confirm()}>
-                        删除
+                        {remote?"移入回收站":"删除"}
                     </Button>
                 </>
             }
         >
-            <p className="text-sm text-stone-500">将删除 {ids.length} 个画布，里面的节点和连线也会一起移除。</p>
+            <p className="text-sm text-stone-500">{remote?`将 ${ids.length} 个画布移入回收站，节点、连线、历史和素材引用会保留，可以从画布列表的回收站恢复。`:`将删除 ${ids.length} 个本地画布，节点和连线也会移除。`}</p>
         </Modal>
     );
 }

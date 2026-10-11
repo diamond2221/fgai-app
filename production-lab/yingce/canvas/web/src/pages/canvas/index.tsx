@@ -31,8 +31,10 @@ import { primeResourceBlobCache } from "@/services/resource-blob-cache";
 import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
 import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
+import {http} from "@/services/api/request";
 
 const CanvasDeleteProjectsDialog = lazy(() => import("@/components/canvas/canvas-delete-projects-dialog").then((module) => ({ default: module.CanvasDeleteProjectsDialog })));
+const FGCanvasRecycleDrawer=lazy(()=>import("@/components/canvas/fg-canvas-recycle-drawer").then(module=>({default:module.FGCanvasRecycleDrawer})));
 
 export default function CanvasPage() {
     const { message } = App.useApp();
@@ -51,6 +53,8 @@ export default function CanvasPage() {
     const hydrated = useCanvasStore((state) => state.hydrated);
     const localProjects = useCanvasStore((state) => state.projects);
     const userId = useUserStore((state) => state.user?.id);
+    const isAdministrator = useUserStore((state) => state.user?.role === "admin");
+    const ownersQuery = useQuery({queryKey:["fg-canvas-owners",userId],queryFn:()=>http.get<{owners:{id:string;name:string;username:string;canvasCount:number}[]}>("/fg/canvas/owners"),enabled:Boolean(userId)&&isAdministrator});
     const sessionHydrated = useUserStore((state) => state.hydrated);
     const [debouncedKeyword, setDebouncedKeyword] = useState("");
     useEffect(() => {
@@ -74,9 +78,19 @@ export default function CanvasPage() {
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const updateProject = useCanvasStore((state) => state.updateProject);
     const [historyOpen, setHistoryOpen] = useState(false);
+    const [recycleOpen,setRecycleOpen]=useState(false);
     const [associationOpen, setAssociationOpen] = useState(false);
     const [associationProjectId, setAssociationProjectId] = useState("");
     const projectQuery = useQuery({ queryKey: ["projects", userId], queryFn: () => listProjects(), enabled: Boolean(userId) });
+
+    useEffect(() => {
+        setProjectFilter("independent");
+        setRecycleOpen(false);
+        setAssociationOpen(false);
+        const ui=useCanvasUiStore.getState();
+        ui.setDeleteProjectIds([]);
+        ui.removeSelectedProjectIds(ui.selectedProjectIds);
+    }, [userId]);
 
     const mode = searchParams.get("mode");
     const agentMode = mode === "new" || mode === "recent" || mode === "choose";
@@ -113,9 +127,10 @@ export default function CanvasPage() {
     const visibleProjects = userId ? filteredProjects : filteredProjects.slice(0, loadedProjectCount);
     const hasMore = userId ? libraryQuery.hasNextPage : visibleProjects.length < filteredProjects.length;
     const selectedProjects = projects.filter((project) => selectedIds.includes(project.id));
-    const projectFilterLabel = projectFilter === "independent" ? "自由画布" : "故事与项目";
+    const selectedOwner=ownersQuery.data?.owners.find(owner=>projectFilter==="owner:"+owner.id);
+    const projectFilterLabel = projectFilter === "independent" ? "自己的画布" : projectFilter==="stories"?"故事与项目":selectedOwner?`${selectedOwner.name}的画布`:"用户画布";
     const sortLabel = sort === "name" ? "按名称" : sort === "nodes" ? "按节点" : "最近更新";
-    const projectFilterItems = [{ key: "independent", label: "自由画布" }, { key: "stories", label: "故事与项目" }];
+    const projectFilterItems = [{ key: "independent", label: "自己的画布" }, { key: "stories", label: "故事与项目" },...(isAdministrator?[{key:"members",label:"按用户查看",children:ownersQuery.data?.owners.length?ownersQuery.data.owners.map(owner=>({key:"owner:"+owner.id,label:`${owner.name} · ${owner.canvasCount} 个画布`})):[{key:"members-empty",label:ownersQuery.isError?"用户目录加载失败":"暂无用户画布",disabled:true}]}]:[])];
     const sortItems = [
         { key: "updated", label: "最近更新", icon: <Clock3 className="size-3.5" /> },
         { key: "name", label: "按名称", icon: <ArrowDownAZ className="size-3.5" /> },
@@ -412,11 +427,12 @@ export default function CanvasPage() {
             <CanvasTakeoverNotice/>
             <div className="studio-band">
                 <PageHeader
-                    title="我的画布"
+                    title={selectedOwner?`${selectedOwner.name}的画布`:projectFilter==="stories"?"故事与项目画布":"我的画布"}
                     description="把镜头、素材和想法留在同一张画布里。"
                     meta={<span className="app-projects-header-meta">{totalProjects} 个</span>}
                     actions={
                         <div className="collection-header-actions">
+                            {userId&&<Button icon={<Trash2 size={15}/>} onClick={()=>setRecycleOpen(true)}>回收站</Button>}
                             <Button type="primary" disabled={!hydrated} icon={<Plus />} onClick={createAndEnter}>
                                 新建画布
                             </Button>
@@ -539,6 +555,7 @@ export default function CanvasPage() {
             </Modal>
             <CanvasHistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
             {deleteDialogOpen ? <Suspense fallback={null}><CanvasDeleteProjectsDialog /></Suspense> : null}
+            {recycleOpen?<Suspense fallback={null}><FGCanvasRecycleDrawer open={recycleOpen} onClose={()=>setRecycleOpen(false)}/></Suspense>:null}
         </WorkspacePage>
     );
 }

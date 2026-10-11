@@ -9,20 +9,22 @@ import (
 )
 
 // This extension is enabled only in the independent FG sixth-module service.
-// Story-linked workspaces are company-shared; all other objects stay private.
+// Stories are company-shared. Administrators can manage members' private work,
+// while administrators' own work remains isolated from other administrators.
 func fgTeamEnabled() bool { return os.Getenv("CANVAS_FG_TEAM_WORKSPACE") == "true" }
 
 func fgProjectScope(db *gorm.DB, table, userID string) *gorm.DB {
 	if !fgTeamEnabled() {
 		return db.Where(table+".user_id = ?", userID)
 	}
-	return db.Where("("+table+".user_id = ? OR EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = "+table+".id))", userID)
+	return db.Where("("+table+".user_id = ? OR EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = "+table+".id)"+fgMemberManagementScope(db, userID, table+".user_id")+")", userID)
 }
 func fgCanvasScope(db *gorm.DB, userID string) *gorm.DB {
+	db = db.Where("canvas_projects.deleted_at IS NULL")
 	if !fgTeamEnabled() {
 		return db.Where("canvas_projects.user_id = ?", userID)
 	}
-	return db.Where("(canvas_projects.user_id = ? OR EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = canvas_projects.project_id))", userID)
+	return db.Where("(canvas_projects.user_id = ? OR EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = canvas_projects.project_id)"+fgMemberManagementScope(db, userID, "canvas_projects.user_id")+")", userID)
 }
 func fgMediaScope(db *gorm.DB, table, grantTable, grantColumn, userID string) *gorm.DB {
 	if !fgTeamEnabled() {
@@ -32,7 +34,7 @@ func fgMediaScope(db *gorm.DB, table, grantTable, grantColumn, userID string) *g
 	if table == "resources" {
 		company = " OR EXISTS (SELECT 1 FROM fg_company_assets ca WHERE ca.resource_id=resources.id)"
 	}
-	return db.Where("("+table+".user_id = ? OR EXISTS (SELECT 1 FROM "+grantTable+" g JOIN fg_story_projects fg ON fg.native_project_id=g.project_id WHERE g."+grantColumn+"="+table+".id)"+company+")", userID)
+	return db.Where("("+table+".user_id = ? OR EXISTS (SELECT 1 FROM "+grantTable+" g JOIN fg_story_projects fg ON fg.native_project_id=g.project_id WHERE g."+grantColumn+"="+table+".id)"+company+fgMemberManagementScope(db, userID, table+".user_id")+")", userID)
 }
 func (r *Repository) FGSharedProject(id string) bool {
 	if !fgTeamEnabled() || id == "" {
@@ -53,9 +55,23 @@ func fgSuperadmin(db *gorm.DB, userID string) bool {
 	return lookup.Table("fg_accounts").Where("user_id=? AND platform_role='superadmin'", userID).Count(&count).Error == nil && count == 1
 }
 
-// Platform administration never grants ownership of personal work.
+func fgMemberManagementScope(db *gorm.DB, userID, ownerColumn string) string {
+	if !fgTeamEnabled() || !fgSuperadmin(db, userID) {
+		return ""
+	}
+	// Only recognized ordinary-user roles qualify; missing accounts fail closed.
+	return " OR EXISTS (SELECT 1 FROM fg_accounts managed WHERE managed.user_id=" + ownerColumn + " AND managed.platform_role IN ('user','member'))"
+}
+
 func (r *Repository) FGCanManageOwner(userID, ownerID string) bool {
-	return userID == ownerID
+	if userID == ownerID {
+		return true
+	}
+	if !fgTeamEnabled() || !fgSuperadmin(r.db, userID) {
+		return false
+	}
+	var count int64
+	return r.db.Session(&gorm.Session{NewDB: true}).Table("fg_accounts").Where("user_id=? AND platform_role IN ('user','member')", ownerID).Count(&count).Error == nil && count == 1
 }
 
 // Called inside the existing canvas-save transaction after resource validation.
