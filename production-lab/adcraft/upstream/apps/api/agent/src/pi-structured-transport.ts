@@ -710,8 +710,10 @@ export function buildPrimaryStructuredCompletionRequest(
         type: "function",
         function: {
           name: "submit_structured_result",
-          description: "Submit the final validated result for this operation.",
-          parameters: input.schema,
+          description: needsToolResultEnvelope(input.schema)
+            ? "Submit the final validated result for this operation in the result field."
+            : "Submit the final validated result for this operation.",
+          parameters: toolResultSchema(input.schema),
         },
       },
     ],
@@ -741,15 +743,36 @@ function canonicalJsonValue(value: unknown): unknown {
   );
 }
 
+function needsToolResultEnvelope(schema: Readonly<Record<string, unknown>>): boolean {
+  return Array.isArray(schema.oneOf) || Array.isArray(schema.anyOf) || Array.isArray(schema.allOf);
+}
+
+function toolResultSchema(schema: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  if (!needsToolResultEnvelope(schema)) return schema;
+  // Keep reference anchors at the document root for union branches using #/$defs.
+  const { $defs, definitions, $id, $schema, ...result } = schema;
+  return {
+    ...($defs ? { $defs } : {}),
+    ...(definitions ? { definitions } : {}),
+    ...($id ? { $id } : {}),
+    ...($schema ? { $schema } : {}),
+    type: "object", properties: { result }, required: ["result"], additionalProperties: false,
+  };
+}
+
 function primaryValue(
   input: StructuredTransportRunInput,
   response: StructuredCompletionResponse,
 ): Readonly<Record<string, unknown>> | undefined {
-  return isJsonObjectTransport(
+  if (isJsonObjectTransport(
     input.credential.execution_policy.structured_transport,
-  )
-    ? repairContent(response)
-    : primaryToolArguments(response);
+  )) return repairContent(response);
+  const value = primaryToolArguments(response);
+  if (!needsToolResultEnvelope(input.schema)) return value;
+  if (!value || Object.keys(value).length !== 1 || !Object.hasOwn(value, "result")) return undefined;
+  const result = value.result;
+  return result && typeof result === "object" && !Array.isArray(result)
+    ? result as Readonly<Record<string, unknown>> : undefined;
 }
 
 function malformedJsonValidation(repairAllowed = true): StructuredValidationResult {

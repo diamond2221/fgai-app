@@ -14,6 +14,7 @@ from app.persistence.errors import V2PersistenceError
 from app.persistence.provider_model_repository import ProviderModelRecord
 from app.schemas.agent_canvas import CanvasModelSummaryV2, CanvasNodeV2
 from app.schemas.provider_models import ProviderAdapterProfileV1
+from app.services.agent_canvas_parameter_policy import NON_PROVIDER_NODE_PARAMETER_KEYS
 from app.services.automatic_model_routing import (
     AutomaticModelRoutingService,
     validate_audio_model_parameters,
@@ -73,6 +74,13 @@ class ModelSelectionService:
     ) -> SelectedModelV1 | None:
         """Validate a persisted selection without requiring a complete Canvas Node."""
 
+        # Guided drafts retain their provenance in authoring parameters. Only
+        # actual provider controls belong in the model's declared matrix.
+        parameters = {
+            name: value
+            for name, value in (parameters or {}).items()
+            if name not in NON_PROVIDER_NODE_PARAMETER_KEYS
+        }
         if node_type == "editing":
             if model_selection_mode != "default" or model_ref is not None:
                 raise _model_error(

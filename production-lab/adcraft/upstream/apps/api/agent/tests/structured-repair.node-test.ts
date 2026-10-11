@@ -84,6 +84,57 @@ function validate(value: Readonly<Record<string, unknown>>) {
   } };
 }
 
+const unionSchema = {
+  $defs: { Audio: schema },
+  oneOf: [{ $ref: "#/$defs/Audio" }, { type: "object", required: ["other"] }],
+};
+
+test("tool transport wraps root unions while retaining root definitions and the original schema", () => {
+  const original = JSON.stringify(unionSchema);
+  const request = buildPrimaryStructuredCompletionRequest({ ...input(), schema: unionSchema });
+  const parameters = request.tools?.[0]?.function.parameters as Record<string, unknown>;
+  assert.equal(parameters.type, "object");
+  assert.equal(parameters.oneOf, undefined);
+  assert.deepEqual(parameters.$defs, unionSchema.$defs);
+  assert.deepEqual(parameters.required, ["result"]);
+  assert.equal(parameters.additionalProperties, false);
+  assert.deepEqual(parameters.properties, { result: { oneOf: unionSchema.oneOf } });
+  assert.equal(JSON.stringify(unionSchema), original);
+});
+
+test("a wrapped tool result is unwrapped before authoritative validation", async () => {
+  const value = candidate("音频生成");
+  let calls = 0;
+  const router = new PiStructuredTransportRouter({ execute: async () => {
+    calls += 1; return response({ result: value }, false);
+  } });
+  const result = await router.run({ ...input(), schema: unionSchema, submit: async received => {
+    assert.deepEqual(received, value); return validate(received);
+  } });
+  assert.deepEqual(result.value, value);
+  assert.equal(calls, 1);
+});
+
+test("malformed union wrappers cannot reach the validator and repair uses the original result", async () => {
+  for (const malformed of [{}, { result: [] }, { result: candidate("音频生成"), injected: true }]) {
+    let calls = 0;
+    let validations = 0;
+    const router = new PiStructuredTransportRouter({ execute: async () =>
+      ++calls === 1 ? response(malformed, false) : response(candidate("音频生成"), true) });
+    const result = await router.run({ ...input(), schema: unionSchema, submit: async value => {
+      validations += 1; return validate(value);
+    } });
+    assert.deepEqual(result.value, candidate("音频生成"));
+    assert.equal(calls, 2);
+    assert.equal(validations, 1);
+  }
+});
+
+test("object tool schemas remain unchanged", () => {
+  const request = buildPrimaryStructuredCompletionRequest(input());
+  assert.deepEqual(request.tools?.[0]?.function.parameters, schema);
+});
+
 test("structured repair retains trusted operation and Skill policy and repairs exact evidence", async () => {
   let calls = 0;
   const requests: StructuredCompletionRequest[] = [];
