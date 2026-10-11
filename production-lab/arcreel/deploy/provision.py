@@ -65,6 +65,10 @@ for actor in users:
     directory.mkdir(parents=True,exist_ok=True)
     assert directory.resolve().parent==root.resolve() and not directory.is_symlink()
     (directory/'.fg-arcreel-ready').write_text('FG private ArcReel workspace\n')
+    recycle=nas.parent/'recycle/arcreel'/actor
+    recycle.mkdir(parents=True,exist_ok=True)
+    assert recycle.resolve()==recycle and not recycle.is_symlink()
+    (recycle/'.fg-recycle-ready').write_text('FG actor recycle v1\n')
     capability=hmac.new(env['FG_ADCRAFT_SECRET'].encode(),('fg-creator-v1:'+actor).encode(),hashlib.sha256).hexdigest()
     net=run('network','inspect',network,optional=True)
     if not net:run('network','create','--subnet',safe_subnet(actor),network)
@@ -79,7 +83,7 @@ for actor in users:
             if state['State']['Running'] and not idle(name,actor):continue
             run('rm','-f',name);existing=None
     if not existing:
-        run('run','-d','--name',name,'--user','1000:1000','--restart','unless-stopped','--network',network,'--ip',address,'--add-host','fg-gateway:'+gateway_ip,'--memory','1024m','--cpus','1','--pids-limit','256','--cap-drop','ALL','--security-opt','no-new-privileges','--mount','type=volume,source='+name+'-state,target=/state','--mount','type=bind,source='+str(directory)+',target=/workspace','-e','FG_ARC_ACTOR='+actor,'-e','FG_ARC_CAPABILITY='+capability,image)
+        run('run','-d','--name',name,'--user','1000:1000','--restart','unless-stopped','--network',network,'--ip',address,'--add-host','fg-gateway:'+gateway_ip,'--memory','1024m','--cpus','1','--pids-limit','256','--cap-drop','ALL','--security-opt','no-new-privileges','--mount','type=volume,source='+name+'-state,target=/state','--mount','type=bind,source='+str(directory)+',target=/workspace','--mount','type=bind,source='+str(recycle)+',target=/fg-recycle','-e','FG_ARC_ACTOR='+actor,'-e','FG_ARC_CAPABILITY='+capability,image)
     if network not in attached:run('network','connect','--alias','fg-gateway','--ip',gateway_ip,network,gateway)
     endpoints[actor]=address
     temporary=metrics/'arcreel-runtimes.new';temporary.write_text(json.dumps(endpoints));temporary.chmod(0o644);temporary.replace(metrics/'arcreel-runtimes.json')

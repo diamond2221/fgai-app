@@ -11,6 +11,7 @@ test('creator purge is confined to archived managed projects with no shared or a
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'fg-creator-trash-'));
  const foreign=fs.mkdtempSync(path.join(os.tmpdir(),'fg-business-files-'));
  fs.writeFileSync(path.join(root,'.fg-creator-ready'),'FG private creator workspace\n');
+ const recycle=path.join(root,'recycle');fs.mkdirSync(recycle);fs.writeFileSync(path.join(recycle,'.fg-recycle-ready'),'FG actor recycle v1\n');
  fs.writeFileSync(path.join(foreign,'keep.txt'),'must remain');
  const db=new Database(':memory:');
  db.exec(`CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT,cwd TEXT,status TEXT,updated_at TEXT);CREATE TABLE threads(project_id TEXT,status TEXT,archived_at TEXT,FOREIGN KEY(project_id) REFERENCES projects(id));CREATE TABLE runs(public_status TEXT,internal_status TEXT);CREATE TABLE creator_jobs(project_id TEXT);CREATE TABLE creator_stage_runs(status TEXT);`);db.pragma('foreign_keys=ON');
@@ -20,7 +21,8 @@ test('creator purge is confined to archived managed projects with no shared or a
  add('project_klmnopqrst',cwd,'active');assert.throws(()=>purgeProjects(db,root,[id]),/其他工程引用/);assert.ok(fs.existsSync(cwd));db.exec("DELETE FROM projects WHERE id='project_klmnopqrst'");
  add('project_uvwxabcdef',foreign);assert.throws(()=>purgeProjects(db,root,['project_uvwxabcdef']),/托管工程/);assert.equal(fs.readFileSync(path.join(foreign,'keep.txt'),'utf8'),'must remain');
  const link=path.join(root,'project-mnopqrstuvwx');fs.symlinkSync(foreign,link);add('project_ghijklmnop',link);assert.throws(()=>purgeProjects(db,root,['project_ghijklmnop']),/安全/);assert.ok(fs.existsSync(path.join(foreign,'keep.txt')));
- db.prepare('INSERT INTO threads VALUES(?,?,NULL)').run(id,'active');assert.equal(purgeProjects(db,root,[id]).length,1);assert.ok(!fs.existsSync(cwd));assert.equal(db.prepare('SELECT status FROM projects WHERE id=?').get(id),undefined);assert.equal(db.prepare('SELECT status FROM threads').get().status,'archived');assert.equal(db.prepare('SELECT project_id FROM threads').get().project_id,null);
+ db.prepare('INSERT INTO threads VALUES(?,?,NULL)').run(id,'active');assert.equal(purgeProjects(db,root,[id],recycle).length,1);assert.ok(!fs.existsSync(cwd));assert.equal(db.prepare('SELECT status FROM projects WHERE id=?').get(id),undefined);assert.equal(db.prepare('SELECT status FROM threads').get().status,'archived');assert.equal(db.prepare('SELECT project_id FROM threads').get().project_id,null);
+ const archived=fs.readdirSync(recycle).find(name=>name.startsWith('project-'));assert.equal(fs.readFileSync(path.join(recycle,archived,'delete.txt'),'utf8'),'fixture');
  assert.ok(fs.existsSync(path.join(foreign,'keep.txt')));db.close();
  // These roots were created explicitly by this test and contain no user data.
  fs.rmSync(root,{recursive:true});fs.rmSync(foreign,{recursive:true});

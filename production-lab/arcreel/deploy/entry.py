@@ -104,6 +104,8 @@ PROVIDER_REGISTRY.clear()
 PROVIDER_REGISTRY.update({'openai': provider('WeToken 文本与图片', openai_models), 'ark': provider('WeToken 视频', video_models)})
 from company_cost import install as install_company_cost
 install_company_cost(base, capability)
+from company_recycle import install as install_company_recycle
+install_company_recycle()
 
 async def configure():
     await init_db()
@@ -159,6 +161,21 @@ AgentAccessPolicy.is_bash_command_whitelisted = classmethod(lambda cls, command:
 async def company_access(request: Request, call_next):
     if request.url.path != '/health' and not hmac.compare_digest(request.headers.get('x-fg-runtime', ''), capability):
         return JSONResponse({'detail': 'FG workspace access required'}, status_code=403)
+    if request.method == 'DELETE' and request.url.path.startswith('/api/v1/projects/') and request.url.path.removeprefix('/api/v1/projects/').count('/') == 0:
+        from company_recycle import preflight_delete
+        try:
+            await asyncio.to_thread(preflight_delete)
+            from urllib.parse import unquote
+            from server.routers.projects import get_project_manager
+            from server.services.project.project_retirement import retiring_project
+            manager = get_project_manager()
+            name = unquote(request.url.path.removeprefix('/api/v1/projects/'))
+            project_dir = await asyncio.to_thread(manager.get_project_path, name)
+            async with retiring_project(async_session_factory, project_dir.name):
+                await asyncio.to_thread(manager.delete_project_directory, name)
+            return JSONResponse({'success': True, 'message': '工程已归档到 NAS recycle/arcreel', 'recycled': True})
+        except Exception:
+            return JSONResponse({'detail': '工程暂不能删除：请确认制作任务已结束且 NAS recycle/arcreel 可写；原工程仍保留'}, status_code=409)
     return await call_next(request)
 
 @native.app.get('/fg-source.tar.gz', include_in_schema=False)

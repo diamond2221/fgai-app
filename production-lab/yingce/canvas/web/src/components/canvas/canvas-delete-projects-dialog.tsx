@@ -43,7 +43,7 @@ export function CanvasDeleteProjectsDialog() {
                 </>
             }
         >
-            <p className="text-sm text-stone-500">{remote?`将 ${ids.length} 个画布移入回收站，保留 30 天，期间可以恢复。到期自动彻底删除，工程记录转入 NAS #recycle；素材库及其他画布使用的素材保留。`:`将删除 ${ids.length} 个本地画布，节点和连线也会移除。`}</p>
+            <p className="text-sm text-stone-500">{remote?`将 ${ids.length} 个画布移入回收站，保留 30 天，期间可以恢复。到期自动彻底删除，工程记录转入 NAS recycle；素材库及其他画布使用的素材保留。`:`将删除 ${ids.length} 个本地画布，节点和连线也会移除。`}</p>
         </Modal>
     );
 }

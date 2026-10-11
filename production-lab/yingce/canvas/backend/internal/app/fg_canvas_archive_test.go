@@ -22,7 +22,7 @@ func TestFGCanvasArchiveRequiresNASAndPreservesExistingFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	files, err := filepath.Glob(filepath.Join(root, "#recycle", "canvases", "*.json"))
+	files, err := filepath.Glob(filepath.Join(root, "recycle", "canvases", "*.json"))
 	if err != nil || len(files) != 1 {
 		t.Fatal(files, err)
 	}
@@ -53,7 +53,7 @@ func TestFGCanvasArchiveRejectsSymlinkRecycleDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "media", ".fg-studio-nas-ready"), []byte("ready"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(root, "#recycle")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(root, "recycle")); err != nil {
 		t.Skip("symlink privileges unavailable")
 	}
 	if err := writeFGCanvasArchive(root, "owner", "canvas", 1, []byte("document")); err == nil {

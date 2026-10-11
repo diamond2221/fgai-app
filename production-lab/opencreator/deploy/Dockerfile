@@ -15,6 +15,7 @@ RUN pnpm --filter @opencreator/web build
 RUN npm install -g @openai/codex@0.149.0 && codex --version
 COPY deploy/entry.mjs /app/fg-entry.mjs
 COPY deploy/trash.mjs /app/fg-trash.mjs
+COPY deploy/recycle.mjs /app/fg-recycle.mjs
 COPY deploy/company-media.mjs /app/company-media.mjs
 COPY deploy/company-media-preload.mjs /app/company-media-preload.mjs
 COPY deploy/company-config.mjs /app/company-config.mjs

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
+import {archiveDirectory} from './fg-recycle.mjs';
 
 const marker='FG private creator workspace\n';
 function inside(root,target){return target.startsWith(root+path.sep);}
@@ -13,12 +14,12 @@ function safeDirectory(root,cwd){
  }
  return folder;
 }
-export function purgeProjects(db,root,ids){
+export function purgeProjects(db,root,ids,recycle='/fg-recycle'){
  if(!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>typeof id!=='string'||!/^project_[A-Za-z0-9_-]{10}$/.test(id)))throw Error('请选择有效工程');
- const unique=[...new Set(ids)],results=[];
+ const unique=[...new Set(ids)],results=[],archived=[];
  // Hold the database write lock while checking state and removing files.
  // Other daemon requests cannot claim a generation during the purge.
- db.transaction(()=>{
+ try{db.transaction(()=>{
   if(db.prepare("SELECT 1 FROM runs WHERE public_status IN ('queued','running','canceling') OR internal_status IN ('created','queued','spawning','running','canceling') LIMIT 1").get())throw Error('请等待制作任务结束后清理');
   if(db.prepare("SELECT 1 FROM creator_stage_runs WHERE status IN ('pending','queued','running','canceling') LIMIT 1").get())throw Error('请等待制作步骤结束后清理');
   const candidates=unique.map(id=>{
@@ -32,22 +33,25 @@ export function purgeProjects(db,root,ids){
   for(const row of candidates){
    // Files are scoped to this actor's mounted directory. Shared company assets,
    // other actor namespaces, credentials and central billing are never touched.
-   if(fs.existsSync(row.folder))fs.rmSync(row.folder,{recursive:true,force:false});
+   if(fs.existsSync(row.folder))archived.push({source:row.folder,destination:archiveDirectory(row.folder,recycle,row)});
    db.prepare('DELETE FROM creator_jobs WHERE project_id=?').run(row.id);
    db.prepare("UPDATE threads SET project_id=NULL,status='archived',archived_at=CURRENT_TIMESTAMP WHERE project_id=?").run(row.id);
    db.prepare('DELETE FROM projects WHERE id=?').run(row.id);
    results.push({id:row.id,name:row.name});
   }
- }).immediate();
+ }).immediate();}catch(error){
+  for(const entry of archived)fs.cpSync(entry.destination,entry.source,{recursive:true,dereference:false,verbatimSymlinks:true});
+  throw error;
+ }
  return results;
 }
-const html=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>创作者回收站</title><style>body{background:#171a20;color:#e6e9ef;font:15px system-ui;margin:32px auto;max-width:950px;padding:0 24px}a{color:#bcc8f3}header{display:flex;align-items:center;justify-content:space-between}button{background:#303644;color:inherit;border:1px solid #495162;border-radius:8px;padding:9px 14px;cursor:pointer}button:disabled{opacity:.45;cursor:default}.danger{background:#832d39}table{width:100%;margin-top:22px;border-collapse:collapse}td,th{padding:15px;text-align:left;border-bottom:1px solid #353b46}small,p{color:#aeb7c8}#msg{color:#facb85}</style><header><h1>创作者回收站</h1><a href="/creator-app#/dashboard">返回工作台</a></header><p>归档工程可以恢复。彻底删除会立即清理该工程独占的 NAS 目录；其他工程、公司素材和账单保留。</p><button id="restore" disabled>恢复选中</button> <button id="purge" class="danger" disabled>彻底删除选中</button><p id="msg" role="status"></p><table><thead><tr><th><input id="all" type="checkbox" aria-label="全选"></th><th>工程</th><th>归档时间</th></tr></thead><tbody id="rows"></tbody></table><script>
+const html=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>创作者回收站</title><style>body{background:#171a20;color:#e6e9ef;font:15px system-ui;margin:32px auto;max-width:950px;padding:0 24px}a{color:#bcc8f3}header{display:flex;align-items:center;justify-content:space-between}button{background:#303644;color:inherit;border:1px solid #495162;border-radius:8px;padding:9px 14px;cursor:pointer}button:disabled{opacity:.45;cursor:default}.danger{background:#832d39}table{width:100%;margin-top:22px;border-collapse:collapse}td,th{padding:15px;text-align:left;border-bottom:1px solid #353b46}small,p{color:#aeb7c8}#msg{color:#facb85}</style><header><h1>创作者回收站</h1><a href="/creator-app#/dashboard">返回工作台</a></header><p>归档工程可以恢复。彻底删除会将该工程独占的文件归档到 NAS recycle/opencreator，不能从工作台恢复；其他工程、公司素材和账单保留。</p><button id="restore" disabled>恢复选中</button> <button id="purge" class="danger" disabled>彻底删除选中</button><p id="msg" role="status"></p><table><thead><tr><th><input id="all" type="checkbox" aria-label="全选"></th><th>工程</th><th>归档时间</th></tr></thead><tbody id="rows"></tbody></table><script>
 const api='/.opencreator/runtime/fg-trash';let projects=[];
 const ids=()=>[...document.querySelectorAll('input[data-id]:checked')].map(e=>e.dataset.id);
 function update(){const empty=!ids().length;document.querySelector('#restore').disabled=empty;document.querySelector('#purge').disabled=empty;}
 async function load(){const r=await fetch(api+'?format=json');if(!r.ok)throw Error('回收站暂不可用');projects=(await r.json()).projects;const rows=document.querySelector('#rows');rows.replaceChildren();for(const p of projects){const row=document.createElement('tr');const box=document.createElement('input');box.type='checkbox';box.dataset.id=p.id;box.setAttribute('aria-label','选择 '+p.name);box.onchange=update;const select=document.createElement('td');select.append(box);row.append(select);for(const text of [p.name,p.archived_at||'—']){const td=document.createElement('td');td.textContent=text;row.append(td);}rows.append(row);}document.querySelector('#all').checked=false;update();if(!projects.length)document.querySelector('#msg').textContent='回收站为空';}
 document.querySelector('#all').onchange=e=>{document.querySelectorAll('input[data-id]').forEach(b=>b.checked=e.target.checked);update();};
-async function act(action){const selected=ids();if(!selected.length)return;if(action==='purge'&&!confirm('彻底删除 '+selected.length+' 个工程及其独占的 NAS 文件？此操作无法恢复。'))return;const r=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,ids:selected,confirm:action==='purge'})});const result=await r.json();if(!r.ok)throw Error(result.error||'操作失败');document.querySelector('#msg').textContent=action==='purge'?'已彻底删除':'已恢复';await load();}
+async function act(action){const selected=ids();if(!selected.length)return;if(action==='purge'&&!confirm('彻底删除 '+selected.length+' 个工程，并归档到 NAS recycle/opencreator？之后不能从工作台恢复。'))return;const r=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,ids:selected,confirm:action==='purge'})});const result=await r.json();if(!r.ok)throw Error(result.error||'操作失败');document.querySelector('#msg').textContent=action==='purge'?'已彻底删除':'已恢复';await load();}
 for(const name of ['restore','purge'])document.querySelector('#'+name).onclick=()=>act(name).catch(e=>document.querySelector('#msg').textContent=e.message);load().catch(e=>document.querySelector('#msg').textContent=e.message);
 </script></html>`;
 

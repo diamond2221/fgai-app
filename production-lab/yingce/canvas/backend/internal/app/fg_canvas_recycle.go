@@ -58,7 +58,7 @@ func (s *Service) archiveFGCanvas(bundle repository.FGCanvasRecycleArchive) erro
 	if err := writeFGCanvasArchive(root, bundle.Canvas.UserID, bundle.Canvas.ID, bundle.Canvas.Revision, data); err != nil {
 		message := "NAS 回收归档未完成，画布仍保留在回收站，请稍后重试"
 		if errors.Is(err, os.ErrPermission) {
-			message = "NAS #recycle 没有写入权限，画布仍保留在回收站；请 NAS 管理员开放 canvases 子目录的读写权限"
+			message = "NAS recycle/canvases 没有写入权限，画布仍保留在回收站；请 NAS 管理员开放该子目录的读写权限"
 		}
 		return WrapAppError(503, message, err)
 	}
@@ -79,7 +79,7 @@ func writeFGCanvasArchive(root, owner, id string, revision int64, data []byte) e
 		return errors.New("NAS 尚未就绪，画布仍保留在回收站")
 	}
 	current := root
-	for _, part := range []string{"#recycle", "canvases"} {
+	for _, part := range []string{"recycle", "canvases"} {
 		current = filepath.Join(current, part)
 		if err := os.Mkdir(current, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return err

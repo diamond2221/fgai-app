@@ -62,6 +62,10 @@ for user in users:
  assert re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',user)
  identity=user.replace('-','');name='fg-creator-'+identity;network=name+'-private';directory=nas/'opencreator/users'/user
  directory.mkdir(parents=True,exist_ok=True);(directory/'.fg-creator-ready').write_text('FG private creator workspace\n')
+ recycle=nas.parent/'recycle/opencreator'/user
+ recycle.mkdir(parents=True,exist_ok=True)
+ assert recycle.resolve()==recycle and not recycle.is_symlink()
+ (recycle/'.fg-recycle-ready').write_text('FG actor recycle v1\n')
  token=hmac.new(env['FG_ADCRAFT_SECRET'].encode(),('fg-creator-v1:'+user).encode(),hashlib.sha256).hexdigest()
  existing=run(['inspect',name],optional=True)
  net=run(['network','inspect',network],optional=True)
@@ -90,7 +94,7 @@ for user in users:
    # Preserve the private state volume when updating an image or stale SMB bind.
    run(['rm','-f',name]);existing=None
  if not existing:
-  run(['run','-d','--name',name,'--restart','unless-stopped','--network',network,'--ip',runtime_ip,'--add-host','fg-gateway:'+gateway_ip,'--memory','768m','--cpus','1','--pids-limit','256','--cap-drop','ALL','--security-opt','no-new-privileges','--mount','type=volume,source='+name+'-state,target=/state','--mount','type=bind,source='+str(directory)+',target=/workspace','-e','FG_CREATOR_ACTOR='+user,'-e','FG_CREATOR_CAPABILITY='+token,image])
+  run(['run','-d','--name',name,'--restart','unless-stopped','--network',network,'--ip',runtime_ip,'--add-host','fg-gateway:'+gateway_ip,'--memory','768m','--cpus','1','--pids-limit','256','--cap-drop','ALL','--security-opt','no-new-privileges','--mount','type=volume,source='+name+'-state,target=/state','--mount','type=bind,source='+str(directory)+',target=/workspace','--mount','type=bind,source='+str(recycle)+',target=/fg-recycle','-e','FG_CREATOR_ACTOR='+user,'-e','FG_CREATOR_CAPABILITY='+token,image])
  if network not in attached:run(['network','connect','--alias','fg-gateway','--ip',gateway_ip,network,gateway])
  endpoints[user]=runtime_ip
  temporary=metrics/'creator-runtimes.new';temporary.write_text(json.dumps(endpoints));temporary.chmod(0o644);temporary.replace(metrics/'creator-runtimes.json')

@@ -20,6 +20,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY deploy/entry.py /app/fg-entry.py
 COPY deploy/company_cost.py /app/company_cost.py
 COPY deploy/company_request.py /app/company_request.py
+COPY deploy/company_recycle.py /app/company_recycle.py
 COPY --from=frontend-builder /build/frontend/dist/ /app/frontend/dist/
 COPY SOURCE.md /app/FG-SOURCE.md
 COPY upstream/ /app/fg-source/upstream/
