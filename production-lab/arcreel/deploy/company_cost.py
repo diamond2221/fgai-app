@@ -4,6 +4,9 @@ import urllib.request
 
 def install(base, capability):
     from lib.billing.cost_calculator import CostCalculator
+    import lib.billing.ledger as ledger
+    from company_request import install_video_settlement
+    install_video_settlement(ledger)
 
     def calculate(self, provider, params, *, estimate_only=False, **kwargs):
         mode = params.call_type

@@ -1,8 +1,29 @@
 """Give each SDK operation an identity and retain its FG task for billing."""
 from contextvars import ContextVar
 from uuid import uuid4
+import re
 
 fg_task = ContextVar('fg_task', default=None)
+
+def install_video_settlement(ledger):
+    """Carry the returned job identity out of Ark's worker thread into settlement.
+
+    asyncio.to_thread copies context into the worker, but does not copy changes
+    back. The backend result is the durable identity used for both generation
+    and resume; never infer a task from another concurrent request.
+    """
+    original = ledger._settlement_from_result
+
+    def settlement(call_type, result, **kwargs):
+        value = original(call_type, result, **kwargs)
+        if call_type == 'video':
+            task_id = getattr(result, 'task_id', None)
+            valid = isinstance(task_id, str) and re.fullmatch(
+                r'(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})', task_id)
+            fg_task.set(task_id if valid else None)
+        return value
+
+    ledger._settlement_from_result = settlement
 
 def sdk_operation_env(env, base):
     """The Claude SDK sends from its Node subprocess, outside Python httpx."""

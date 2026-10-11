@@ -2,12 +2,52 @@
 import asyncio
 import unittest
 import httpx
-from company_request import install, fg_task, sdk_operation_env
+from company_request import install, fg_task, sdk_operation_env, install_video_settlement
+from types import SimpleNamespace
 
 BASE = 'http://fg-gateway:3010/internal/arcreel/test'
 install(BASE, 'fixture-capability')
 
 class RequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_ledger_success_inherits_native_video_identity(self):
+        import lib.billing.ledger as ledger
+        original = ledger._settlement_from_result
+        try:
+            install_video_settlement(ledger)
+            identity = 'c0899265137bd30a97aff5ed86b6a2b0'
+            call = ledger.LedgerCall(1, call_type='video', service_tier='default')
+            call.success(SimpleNamespace(task_id=identity, usage_tokens=None,
+                                         generate_audio=False, duration_seconds=4))
+            async def write():
+                return fg_task.get(), call._settlement.billed_duration_seconds
+            self.assertEqual(await asyncio.create_task(write()), (identity, 4))
+        finally:
+            ledger._settlement_from_result = original
+
+    async def test_video_thread_result_reaches_settlement_and_resume_without_cross_task_leak(self):
+        ledger = SimpleNamespace(_settlement_from_result=lambda kind, result, **kw: (kind, result))
+        install_video_settlement(ledger)
+        ids = ['a'*32, 'b'*32]
+
+        async def settle(task_id):
+            fg_task.set('unrelated')
+            await asyncio.to_thread(fg_task.set, task_id)
+            self.assertEqual(fg_task.get(), 'unrelated')
+            result = SimpleNamespace(task_id=task_id)
+            self.assertEqual(ledger._settlement_from_result('video', result), ('video', result))
+            async def write():
+                await asyncio.sleep(0)
+                return fg_task.get()
+            return await asyncio.create_task(write())
+
+        self.assertEqual(await asyncio.gather(*(settle(i) for i in ids)), ids)
+        self.assertNotIn(fg_task.get(), ids)
+        fg_task.set(ids[0])
+        ledger._settlement_from_result('video', SimpleNamespace(task_id='unknown-provider-task'))
+        self.assertIsNone(fg_task.get())
+        fg_task.set(ids[1])
+        ledger._settlement_from_result('image', SimpleNamespace())
+        self.assertEqual(fg_task.get(), ids[1])
     def test_synchronous_ark_submit_keeps_operation_identity_and_task(self):
         seen = []
 
