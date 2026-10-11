@@ -6,6 +6,7 @@ import { ArrowUp, ChevronDown, Clapperboard, FileText, Image as ImageIcon, Spark
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { aceternityMotion } from "@/lib/aceternity-motion";
+import { fgStaticAssetURL } from "@/lib/fg-entry-url";
 import { curatedInspirations, inspirationSourceOf, inspirationSources } from "@/lib/inspirations/catalog";
 import { modeLabels } from "./creation-types";
 import { Button } from "antd";
@@ -22,7 +23,7 @@ export function CreationEmptyBanner() {
         <div className="creation-empty-art" aria-hidden="true">
             {creationEmptyBannerFrames.map((frame, index) => (
                 <figure key={frame.caption} className={`creation-empty-art-frame ${index === 1 ? "is-main" : index === 0 ? "is-back" : "is-front"}`}>
-                    <img src={frame.src} alt="" />
+                    <img src={fgStaticAssetURL(frame.src, import.meta.env.BASE_URL)} alt="" />
                     <span>{frame.caption}</span>
                 </figure>
             ))}

@@ -6,6 +6,7 @@ import { AudioPlayButton, CharacterAssetCover } from "@/components/assets/asset-
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { assetCategoryLabel } from "@/lib/asset-category";
 import { formatBytes } from "@/lib/image-utils";
+import { fgStaticAssetURL } from "@/lib/fg-entry-url";
 import { useRef, useState } from "react";
 import { resourceStorageLabel, resourceStorageLocation, resourceStorageTitle } from "@/lib/canvas/resource-storage-status";
 import { type LibraryAsset, assetKindIcons } from "./asset-library-format";
@@ -85,7 +86,7 @@ export function AssetsEmptyState({ onNew, onImport, onGoCanvas }: { onNew: () =>
             <div className="assets-empty-banner" aria-hidden="true">
                 {assetsEmptyBannerFrames.map((frame, index) => (
                     <figure key={frame.caption} className={`assets-empty-banner-frame ${index === 1 ? "is-main" : index === 0 ? "is-back" : "is-front"}`}>
-                        <img src={frame.src} alt="" loading="lazy" decoding="async" />
+                        <img src={fgStaticAssetURL(frame.src, import.meta.env.BASE_URL)} alt="" loading="lazy" decoding="async" />
                         <span>{frame.caption}</span>
                     </figure>
                 ))}

@@ -2,6 +2,13 @@ export function fgWorkspaceBasePath(pathname: string) {
     return /^\/fg-six(?:\/|$)/.test(pathname) ? "/fg-six" : "";
 }
 
+export function fgStaticAssetURL(path: string, baseURL: string) {
+    if (!path.startsWith("/") || path.startsWith("//")) return path;
+    const base = baseURL.replace(/\/+$/, "");
+    if (!base || path === base || path.startsWith(`${base}/`)) return path;
+    return `${base}${path}`;
+}
+
 export function fgCanvasShareURL(origin: string, pathname: string, token: string) {
     return new URL(`${fgWorkspaceBasePath(pathname)}/share/canvas/${encodeURIComponent(token)}`, origin).href;
 }

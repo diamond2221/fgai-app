@@ -1,4 +1,5 @@
 import type { CreationMode } from "@/lib/creation-mode";
+import { fgStaticAssetURL } from "@/lib/fg-entry-url";
 import { HIGHLIGHT_REVISIONS } from "./source-revisions";
 
 export type InspirationSourceId = "original" | "chatgpt-prompts" | "seedance" | "haohaoxue" | "youmind";
@@ -265,7 +266,7 @@ const curatedWorks: CreationInspiration[] = [
 ];
 
 /** 本项目编写的条目，灵感页把它单独作为「原创」分类。 */
-export const curatedInspirations: CreationInspiration[] = curatedWorks;
+export const curatedInspirations: CreationInspiration[] = curatedWorks.map((item) => ({ ...item, image: fgStaticAssetURL(item.image, import.meta.env?.BASE_URL ?? "/") }));
 
 /** 需要对外声明的来源（原创不写声明），供页面署名与合规展示复用。 */
 export function declaredInspirationSources(): InspirationSourceInfo[] {

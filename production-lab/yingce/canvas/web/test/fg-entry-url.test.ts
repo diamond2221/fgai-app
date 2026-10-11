@@ -1,5 +1,5 @@
 import {test, expect} from "bun:test";
-import {fgWorkspaceBasePath, fgPlatformURL, fgDirectorURL, fgResourceAccessURL, fgCanvasShareURL} from "../src/lib/fg-entry-url";
+import {fgWorkspaceBasePath, fgPlatformURL, fgDirectorURL, fgResourceAccessURL, fgCanvasShareURL, fgStaticAssetURL} from "../src/lib/fg-entry-url";
 
 test("public workspace paths keep the existing external origin and port", () => {
     expect(fgWorkspaceBasePath("/fg-six/canvas/123")).toBe("/fg-six");
@@ -23,4 +23,13 @@ test("public resource delivery keeps signed queries and absolute CDN URLs intact
     expect(fgResourceAccessURL("https://media.example/file?signature=abc", "/fg-six/api")).toBe("https://media.example/file?signature=abc");
     expect(fgResourceAccessURL("/api/resources/123/file", "/api")).toBe("/api/resources/123/file");
     expect(fgResourceAccessURL("/api/resources/123/file", "https://api.example/api")).toBe("https://api.example/api/resources/123/file");
+});
+
+test("gallery static files resolve under the workspace without rewriting upstream URLs", () => {
+    expect(fgStaticAssetURL("/inspirations/gallery-pool.json", "/fg-six/")).toBe("/fg-six/inspirations/gallery-pool.json");
+    expect(fgStaticAssetURL("/inspiration-thumbs/seedance/example.webp", "/fg-six/")).toBe("/fg-six/inspiration-thumbs/seedance/example.webp");
+    expect(fgStaticAssetURL("/fg-six/short-drama-styles/example.jpg", "/fg-six/")).toBe("/fg-six/short-drama-styles/example.jpg");
+    expect(fgStaticAssetURL("https://cdn.example/cover.jpg?signature=abc", "/fg-six/")).toBe("https://cdn.example/cover.jpg?signature=abc");
+    expect(fgStaticAssetURL("//cdn.example/cover.jpg", "/fg-six/")).toBe("//cdn.example/cover.jpg");
+    expect(fgStaticAssetURL("/inspirations/manifest.json", "/")).toBe("/inspirations/manifest.json");
 });
