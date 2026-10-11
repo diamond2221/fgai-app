@@ -48,6 +48,7 @@ from app.schemas.agent_canvas_conversation import ChatTurnV2
 from app.schemas.agent_canvas_guidance import ContinuationTurnRetrySnapshotV1
 from app.schemas.agent_canvas_production_journey import JourneyStageV2
 from app.services.agent_canvas_production_journey import parse_production_journey
+from app.services.agent_canvas_envelope_digest import operation_envelope_digest
 from app.schemas.language import BCP47Tag
 from app.schemas.v2_persistence import V2EventInsert
 
@@ -545,7 +546,7 @@ def _retry_snapshot_json(
         root_turn_id=source_turn.turn_id,
         operation="capability_command",
         envelope_id=envelope.envelope_id,
-        envelope_digest=hashlib.sha256(envelope.model_dump_json().encode("utf-8")).hexdigest(),
+        envelope_digest=operation_envelope_digest(envelope),
         requirement_revision_id=envelope.requirement_revision_id,
         requirement_digest=envelope.requirement_digest,
         node_revisions=node_revisions,

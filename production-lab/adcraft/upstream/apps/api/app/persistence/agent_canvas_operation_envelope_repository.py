@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TypeAlias
 
 from pydantic import TypeAdapter
@@ -26,6 +25,7 @@ from app.schemas.agent_canvas_continuation import ContinuationOperationV2
 from app.services.agent_canvas_storyboard_selection_identity import (
     validate_storyboard_envelope_identity,
 )
+from app.services.agent_canvas_envelope_digest import canonical_envelope_json
 
 
 OperationEnvelopeV1: TypeAlias = (
@@ -201,12 +201,7 @@ class AgentCanvasOperationEnvelopeRepository:
 
 
 def _canonical_json(envelope: OperationEnvelopeV1) -> str:
-    return json.dumps(
-        envelope.model_dump(mode="json"),
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
+    return canonical_envelope_json(envelope)
 
 
 def _persisted_envelope(row) -> OperationEnvelopeV1:

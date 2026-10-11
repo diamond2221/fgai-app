@@ -28,6 +28,7 @@ from app.schemas.agent_canvas_conversation import (
 from app.schemas.agent_canvas_capabilities import CapabilityCommandEnvelopeV2
 from app.schemas.agent_canvas_guidance import ContinuationTurnRetrySnapshotV1
 from app.services.agent_canvas_explicit_retry import explicit_turn_retryable
+from app.services.agent_canvas_envelope_digest import operation_envelope_digest_matches
 
 
 class ChatTurnRetryService:
@@ -227,8 +228,7 @@ class ChatTurnRetryService:
         envelope = self._envelopes.get(snapshot.envelope_id)
         if (
             envelope.workflow_id != workflow_id
-            or hashlib.sha256(envelope.model_dump_json().encode("utf-8")).hexdigest()
-            != snapshot.envelope_digest
+            or not operation_envelope_digest_matches(envelope, snapshot.envelope_digest)
         ):
             raise _stale_error()
         if isinstance(envelope, CapabilityCommandEnvelopeV2):

@@ -29,6 +29,7 @@ from app.persistence.agent_canvas_guidance_authority_repository import (
 from app.persistence.agent_canvas_operation_envelope_repository import (
     AgentCanvasOperationEnvelopeRepository,
 )
+from app.services.agent_canvas_envelope_digest import operation_envelope_digest
 from app.persistence.agent_canvas_requirement_repository import (
     AgentCanvasRequirementRepository,
 )
@@ -3412,9 +3413,7 @@ class AgentCanvasConversationRepository:
         next_snapshot = retry_snapshot.model_copy(
             update={
                 "envelope_id": envelope_id,
-                "envelope_digest": hashlib.sha256(
-                    envelope.model_dump_json().encode("utf-8")
-                ).hexdigest(),
+                "envelope_digest": operation_envelope_digest(envelope),
             }
         )
         request = {"schema_version": "1", "envelope_id": envelope_id}
@@ -4029,7 +4028,7 @@ class AgentCanvasConversationRepository:
             root_turn_id=continuation.continuation_turn_id,
             operation="next_action",
             envelope_id=envelope_id,
-            envelope_digest=hashlib.sha256(envelope.model_dump_json().encode("utf-8")).hexdigest(),
+            envelope_digest=operation_envelope_digest(envelope),
             requirement_revision_id=requirement.revision_id,
             requirement_digest=requirement.digest,
             node_revisions=node_revisions,
