@@ -633,8 +633,12 @@ def _execution_leaf(
         if not child_ids:
             break
         if len(child_ids) != 1:
-            raise _lineage_error("Guided action execution lineage is ambiguous.")
-        child_id = next(iter(child_ids))
+            child_id = _sequential_retry_leaf_child(
+                connection, workflow_id, child_ids, retry_children,
+                delivery_children, continuation_rows, envelopes=envelopes,
+            )
+        else:
+            child_id = next(iter(child_ids))
         current = _require_turn(connection, child_id, workflow_id)
         matching = [
             row for row in delivery_children if str(row["continuation_turn_id"]) == child_id
@@ -668,6 +672,42 @@ def _execution_leaf(
         error_code=(str(current["error_code"]) if current["error_code"] else None),
         retryable=bool(current["retryable"]),
     )
+
+
+def _sequential_retry_leaf_child(
+    connection: Connection,
+    workflow_id: str,
+    child_ids: set[str],
+    retry_children: list[RowMapping],
+    delivery_children: list[RowMapping],
+    continuation_rows: list[RowMapping],
+    *,
+    envelopes: AgentCanvasOperationEnvelopeRepository,
+) -> str:
+    """Keep earlier failed attempts as audit history without accepting branches."""
+    if len(child_ids) > 32 or child_ids != {str(row['turn_id']) for row in retry_children}:
+        raise _lineage_error("Guided action execution lineage is ambiguous.")
+    ordered = sorted(retry_children, key=lambda row: str(row['created_at']))
+    if len({str(row['created_at']) for row in ordered}) != len(ordered):
+        raise _lineage_error("Guided action execution lineage is ambiguous.")
+    for index, row in enumerate(ordered):
+        turn_id = str(row['turn_id'])
+        _require_turn(connection, turn_id, workflow_id)
+        matching = [delivery for delivery in delivery_children
+                    if str(delivery['continuation_turn_id']) == turn_id]
+        if len(matching) != 1:
+            raise _lineage_error("Typed retry lineage is missing its Continuation.")
+        _validate_delivery_envelope(connection, workflow_id=workflow_id, turn_id=turn_id,
+                                    delivery=matching[0], envelopes=envelopes)
+        if index == len(ordered) - 1:
+            continue
+        descendant = connection.execute(select(AgentCanvasChatTurnRow.turn_id).where(
+            AgentCanvasChatTurnRow.retry_of_turn_id == turn_id).limit(1)).first()
+        if (str(row['status']) != 'failed' or str(matching[0]['status']) != 'failed'
+                or descendant is not None or any(
+                    str(delivery['source_turn_id']) == turn_id for delivery in continuation_rows)):
+            raise _lineage_error("Guided action execution lineage is ambiguous.")
+    return str(ordered[-1]['turn_id'])
 
 
 def _validate_delivery_envelope(

@@ -36,9 +36,9 @@ def retry_repository(v2_media_data_dir):
         requirement_revision_id='requirement', requirement_digest='b' * 64, node_revisions={}, asset_ids=(),
         response_locale='und', policy_identity_digest='c' * 64,
     )
-    def retry():
+    def retry(key='retry-once'):
         return repository.create_typed_retry_turn(source, source_envelope=envelope(),
-            operation='capability_command', idempotency_key='retry-once', retry_snapshot=snapshot)
+            operation='capability_command', idempotency_key=key, retry_snapshot=snapshot)
     try:
         yield repository, database, retry
     finally:
