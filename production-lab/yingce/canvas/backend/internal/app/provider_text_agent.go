@@ -58,7 +58,7 @@ func runAgentToolTask(ctx context.Context, input canvasGenerationInput) (map[str
 	body["model"] = input.Config.Model
 	applyTextThinking(body, input, protocol)
 	applyAgentOutputLimit(body, agentStepOutputLimit(input), protocol)
-	if protocol == "claude-api" {
+	if requiresClaudeToolSchema(input.Config, protocol) {
 		normalizeClaudeAgentToolSchemas(body)
 	}
 	normalizeAgentToolChoice(body, input, protocol)
@@ -155,7 +155,7 @@ func runDeclarativeAgentTask(ctx context.Context, input canvasGenerationInput, a
 		}
 		applyTextThinking(body, input, wire)
 		applyAgentOutputLimit(body, agentStepOutputLimit(input), wire)
-		if wire == "claude-api" {
+		if requiresClaudeToolSchema(input.Config, wire) {
 			normalizeClaudeAgentToolSchemas(body)
 		}
 		normalizeAgentToolChoice(body, input, wire)
@@ -258,7 +258,11 @@ func executeDeclarativeAgentWithGeminiCache(ctx context.Context, input canvasGen
 	return executeProtocolRequest(ctx, input.Config, rebuilt)
 }
 
-// Claude rejects root combinators on input_schema. Keep field schemas and
+func requiresClaudeToolSchema(config providerConfig, wire string) bool {
+	return wire == "claude-api" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(config.Model)), "claude")
+}
+
+// Claude, including OpenAI-compatible relays, rejects root combinators. Keep field schemas and
 // communicate cross-field rules in the description; original server tool
 // definitions remain unchanged and still enforce model selection and authority.
 func normalizeClaudeAgentToolSchemas(body map[string]interface{}) {
@@ -273,7 +277,15 @@ func normalizeClaudeAgentToolSchemas(body map[string]interface{}) {
 			normalized = append(normalized, value)
 			continue
 		}
-		schema, ok := tool["input_schema"].(map[string]interface{})
+		definition := tool
+		if function, ok := tool["function"].(map[string]interface{}); ok {
+			definition = function
+		}
+		schemaKey := "input_schema"
+		if definition[schemaKey] == nil {
+			schemaKey = "parameters"
+		}
+		schema, ok := definition[schemaKey].(map[string]interface{})
 		if !ok {
 			normalized = append(normalized, value)
 			continue
@@ -289,6 +301,11 @@ func normalizeClaudeAgentToolSchemas(body map[string]interface{}) {
 			continue
 		}
 		toolCopy := cloneStringAnyMap(tool)
+		definitionCopy := toolCopy
+		if definition["input_schema"] == nil && tool["function"] != nil {
+			definitionCopy = cloneStringAnyMap(definition)
+			toolCopy["function"] = definitionCopy
+		}
 		schemaCopy := cloneStringAnyMap(schema)
 		for key := range rules {
 			delete(schemaCopy, key)
@@ -298,8 +315,8 @@ func normalizeClaudeAgentToolSchemas(body map[string]interface{}) {
 			normalized = append(normalized, value)
 			continue
 		}
-		toolCopy["input_schema"] = schemaCopy
-		toolCopy["description"] = stringField(tool, "description") + "\nAdditional argument constraints, enforced by the server: " + string(encoded)
+		definitionCopy[schemaKey] = schemaCopy
+		definitionCopy["description"] = stringField(definition, "description") + "\nAdditional argument constraints, enforced by the server: " + string(encoded)
 		normalized = append(normalized, toolCopy)
 	}
 	body["tools"] = normalized

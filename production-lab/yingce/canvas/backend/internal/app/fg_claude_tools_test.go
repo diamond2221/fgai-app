@@ -11,6 +11,12 @@ import (
 )
 
 func TestFGClaudeCanvasToolsPreserveServerSchemaWithoutUnsupportedRootCombinators(t *testing.T) {
+	for _, wire := range []model.ChannelInterfaceType{model.ChannelInterfaceClaudeAPI, model.ChannelInterfaceChatCompletion} {
+		t.Run(string(wire), func(t *testing.T) { verifyFGClaudeToolsTransport(t, string(wire)) })
+	}
+}
+
+func verifyFGClaudeToolsTransport(t *testing.T, wire string) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
 	req := CloudAgentRequest{PermissionMode: "auto", ContextScope: []string{"canvas"}}
 	tools := cloudAgentTools(req)
@@ -24,7 +30,13 @@ func TestFGClaudeCanvasToolsPreserveServerSchemaWithoutUnsupportedRootCombinator
 		found := false
 		for _, raw := range body["tools"].([]interface{}) {
 			tool := raw.(map[string]interface{})
-			schema := tool["input_schema"].(map[string]interface{})
+			if function, ok := tool["function"].(map[string]interface{}); ok {
+				tool = function
+			}
+			schema, ok := tool["input_schema"].(map[string]interface{})
+			if !ok {
+				schema = tool["parameters"].(map[string]interface{})
+			}
 			for _, key := range []string{"oneOf", "allOf", "anyOf"} {
 				if _, ok := schema[key]; ok {
 					t.Errorf("Claude tool %s contains unsupported root %s", tool["name"], key)
@@ -44,10 +56,14 @@ func TestFGClaudeCanvasToolsPreserveServerSchemaWithoutUnsupportedRootCombinator
 			t.Error("lost media generation tool")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"verified"}]}`))
+		if wire == string(model.ChannelInterfaceClaudeAPI) {
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"verified"}]}`))
+		} else {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"verified"}}]}`))
+		}
 	}))
 	defer server.Close()
-	_, err := runAgentToolTask(context.Background(), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL, APIKey: "test", Model: "test", InterfaceType: string(model.ChannelInterfaceClaudeAPI)}, AgentRequests: &agentToolRequests{Canonical: &canonical}})
+	_, err := runAgentToolTask(context.Background(), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL, APIKey: "test", Model: "claude-opus-test", InterfaceType: wire}, AgentRequests: &agentToolRequests{Canonical: &canonical}})
 	if err != nil {
 		t.Fatal(err)
 	}
