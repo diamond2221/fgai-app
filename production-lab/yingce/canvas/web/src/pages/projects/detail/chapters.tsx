@@ -1,4 +1,4 @@
-import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm } from "antd";
+import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Select, Segmented } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { Tooltip } from "@/components/ui/base/tooltip";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
@@ -53,6 +53,8 @@ import { useNavigate, useParams } from "react-router";
 
 import { SkillRuntimePicker, useSkillRuntimeCatalog } from "@/components/skills/skill-runtime-picker";
 import { ModelPicker } from "@/components/model-picker";
+import { FGPricePreview } from "@/components/fg-price-preview";
+import { createDramaProductionPlan, dramaSegmentDurations, DRAMA_SKILL_ATTRIBUTION, type DramaProductionPlan } from "@/lib/short-drama-production";
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
 import { decodeNovelText, splitTextIntoChapters } from "@/lib/canvas/canvas-document";
@@ -111,6 +113,12 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
     const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
     const { skills: availableSkills, loading: skillsLoading } = useSkillRuntimeCatalog();
     const effectiveConfig = useEffectiveConfig();
+    const [planningVideoModel, setPlanningVideoModel] = useState(detail.project.defaultVideoModel || effectiveConfig.videoModel);
+    const [segmentSeconds, setSegmentSeconds] = useState(15);
+    const [segmentStrategy, setSegmentStrategy] = useState<DramaProductionPlan["strategy"]>("story");
+    const planningDurations = dramaSegmentDurations(effectiveConfig, planningVideoModel);
+    const planningSeconds = planningDurations.includes(segmentSeconds) ? segmentSeconds : planningDurations.includes(15) ? 15 : planningDurations[0];
+    useEffect(() => { if (!planningVideoModel) setPlanningVideoModel(detail.project.defaultVideoModel || effectiveConfig.videoModel); }, [planningVideoModel, detail.project.defaultVideoModel, effectiveConfig.videoModel]);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const listRef = useRef<HTMLDivElement>(null);
     const locallyOwnedTaskIdsRef = useRef(new Set<string>());
@@ -363,8 +371,8 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         refreshProject();
         return created.candidates.length;
     };
-    const storeGeneratedStoryboard = async (unitId: string, rows: ReturnType<typeof chapterStoryboardFromGenerationTask>["rows"]) => {
-        const shots = storyboardRowsToProjectShots(rows, detail);
+    const storeGeneratedStoryboard = async (unitId: string, rows: ReturnType<typeof chapterStoryboardFromGenerationTask>["rows"], productionPlan?: DramaProductionPlan) => {
+        const shots = storyboardRowsToProjectShots(rows, detail, productionPlan);
         await replaceProjectUnitShots(detail.project.id, unitId, shots, detail.shots.filter((shot) => shot.unitId === unitId).map((shot) => shot.id));
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ["project", detail.project.id] }),
@@ -411,6 +419,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
             return;
         }
         if (storyboardImpact.shotCount && !(await confirmStoryboardReplacement(storyboardImpact))) return;
+        if (!planningVideoModel || !planningSeconds) return message.warning("请选择支持至少 13 秒片段的目标视频模型");
         setStoryboardOpen(false);
         beginChapterOperation(unit.id, "storyboard");
         message.info("分镜生成任务已开始，可继续编辑或切换章节");
@@ -431,9 +440,10 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                 config,
                 skills: availableSkills,
                 selectedSkillIds,
+                productionPlan: createDramaProductionPlan(effectiveConfig, planningVideoModel, planningSeconds, segmentStrategy),
             }, { onTaskUpdate: (task) => updateChapterOperation(unit.id, "storyboard", task) });
-            const shotCount = await storeGeneratedStoryboard(unit.id, result.rows);
-            message.success(result.skillCount ? `已生成 ${shotCount} 个分镜，并应用 ${result.skillCount} 个技能` : `已生成 ${shotCount} 个分镜`);
+            const shotCount = await storeGeneratedStoryboard(unit.id, result.rows, result.productionPlan);
+            message.success(`已生成 ${shotCount} 个视频片段，并应用 ${result.skillCount} 个技能`);
             navigate(`/projects/${detail.project.id}/workflow/${unit.id}/storyboard`);
         } catch (error) {
             refreshProject();
@@ -481,7 +491,8 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                     await storeExtractedAssets(taskChapterId, chapterAssetsFromGenerationTask(completedTask));
                     message.success("已恢复刷新前完成的章节资产提取结果");
                 } else {
-                    await storeGeneratedStoryboard(taskChapterId, chapterStoryboardFromGenerationTask(completedTask).rows);
+                    const result = chapterStoryboardFromGenerationTask(completedTask);
+                    await storeGeneratedStoryboard(taskChapterId, result.rows, result.productionPlan);
                     message.success("已恢复刷新前完成的章节分镜");
                 }
                 recoveredTaskIdsRef.current.add(task.id);
@@ -629,7 +640,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                     </label>
                 </div>
             </Modal>
-            <Modal className="library-modal" title="生成章节分镜" open={storyboardOpen} width={560} okText={storyboardImpact.shotCount ? "重新生成分镜" : "生成分镜"} cancelText="取消" okButtonProps={{ disabled: !selectedTextModel }} onCancel={() => setStoryboardOpen(false)} onOk={() => void createStoryboard()} styles={{ body: { paddingTop: 12 } }}>
+            <Modal className="library-modal" title="生成剧情视频片段" open={storyboardOpen} width={620} okText={storyboardImpact.shotCount ? "重新划分片段" : "生成片段脚本"} cancelText="取消" okButtonProps={{ disabled: !selectedTextModel || !planningSeconds }} onCancel={() => setStoryboardOpen(false)} onOk={() => void createStoryboard()} styles={{ body: { paddingTop: 12 } }}>
                 <div className="grid gap-4">
                     <div className="rounded-lg border border-border/70 bg-foreground/[.018] px-3 py-2.5">
                         <div className="text-[var(--fs-tiny)] text-foreground/42">当前章节</div>
@@ -641,6 +652,18 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                         <span className="mb-1.5 block text-xs font-medium text-foreground/68">文本模型</span>
                         <ModelPicker config={effectiveConfig} capability="text" value={selectedTextModel} onChange={setSelectedTextModel} variant="creation" fullWidth placeholder="选择用于生成分镜的文本模型" showSelectedPrice={false} onMissingConfig={() => navigateToSettings({ continueCreation: true })} />
                     </label>
+                    <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium text-foreground/68">目标视频模型</span>
+                        <ModelPicker config={effectiveConfig} capability="video" value={planningVideoModel} onChange={setPlanningVideoModel} variant="creation" fullWidth placeholder="选择后续制作使用的视频模型" showSelectedPrice={false} />
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                        <label><span className="mb-1.5 block text-xs font-medium text-foreground/68">片段时长</span><Select className="w-full" value={planningSeconds} onChange={setSegmentSeconds} options={planningDurations.map(value => ({ value, label: `${value} 秒` }))} placeholder="该模型不支持 13 秒以上片段" /></label>
+                        <label><span className="mb-1.5 block text-xs font-medium text-foreground/68">划分方式</span><Segmented block value={segmentStrategy} onChange={value => setSegmentStrategy(value as DramaProductionPlan["strategy"])} options={[{ value: "story", label: "按剧情划分" }, { value: "fixed", label: "固定时长" }]} /></label>
+                    </div>
+                    <p className="text-xs leading-5 text-foreground/50">一个片段生成一条视频，片段内可包含多个镜头。按剧情模式会在所选时长以内、至少 13 秒的支持档位中选择自然落点；保留完整对白和场面衔接。</p>
+                    {planningSeconds ? <FGPricePreview config={{ ...effectiveConfig, model: planningVideoModel, videoSeconds: String(planningSeconds) }} model={planningVideoModel} mode="video" requirements={{ capability: "video", videoSeconds: String(planningSeconds), input: { textCount: 1, imageCount: 0, characterCount: 0, videoCount: 0, audioCount: 0 } }} /> : null}
+                    <p className="text-[var(--fs-tiny)] text-foreground/45">上方为所选规格单条视频的费用参考；本次先生成脚本，视频在分镜制作中另行提交。</p>
+                    <div className="rounded-lg bg-foreground/[.025] p-3 text-xs leading-5 text-foreground/65"><p>{DRAMA_SKILL_ATTRIBUTION}</p><p className="mt-2">默认应用 short-drama-asset-prompts（资产设定与引用校验）和 script-to-drama-prompt-dev（片段分镜与视频提示词）。</p></div>
                     <div>
                         <label className="block">
                             <span className="mb-1.5 block text-xs font-medium text-foreground/68">分镜技能</span>

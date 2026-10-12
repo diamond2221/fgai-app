@@ -8,7 +8,7 @@ import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { modelCapabilityConfigFor, workflowFieldCurrentValue, workflowFieldHasStoredValue, workflowFieldKey, workflowFieldRandomKey, workflowFieldSubmissionValue, workflowOutputSizeValue, workflowVideoFieldsFromJson } from "@/lib/model-capabilities";
-import { modelRequestOptions, resolveCompatibleModel, resolveModelGenerationDefaults, resolveVideoOperation, type ModelGenerationDefaults, type ModelRequirements } from "@/lib/model-selection";
+import { modelRequestOptions, resolveCompatibleModel, resolveModelGenerationDefaults, resolveVideoOperation, resolveVideoOperationForModel, videoRequiresAdaptiveFrameRatio, type ModelGenerationDefaults, type ModelRequirements } from "@/lib/model-selection";
 import { imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { producedModelCandidateForGeneration } from "@/lib/canvas/produced-model";
 import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
@@ -330,13 +330,17 @@ export function buildVideoGenerationMetadata(
     const metadata = node?.metadata;
     const referenceImageIds = new Set((context?.referenceImages || []).map((image) => image.id));
     // 工作流视频把已连接媒体交给字段映射处理，不再把历史首尾帧选择当成硬约束。
-    // 工作流视频把已连接媒体交给字段映射处理，不再把历史首尾帧选择当成硬约束。
     const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
-    const startFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds);
-    const endFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds);
+    const input = { textCount: 0, imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0, characterCount: 0 };
+    const operation = config ? resolveVideoOperationForModel(config, config.model, input, metadata?.videoEditOperation) as CanvasVideoEditOperation : resolveVideoEditOperation(node, context);
+    const frames = !workflowVideo && operation !== "reference_to_video";
+    const startFrame = frames ? requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds) : undefined;
+    const endFrame = frames ? requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds) : undefined;
+    if (operation === "image_to_video" && (input.videoCount || input.audioCount || input.imageCount > 2)) throw new Error("首尾帧模式仅使用一至两张图片，请移除其他参考素材或选择全能参考");
+    if (startFrame && startFrame === endFrame) throw new Error("首帧和尾帧请选择不同的图片");
     return {
         ...(config ? generationWorkflowMetadata(config) : {}),
-        videoEditOperation: resolveVideoEditOperation(node, context),
+        videoEditOperation: operation,
         videoCameraMoveId: metadata?.videoCameraMoveId,
         videoCameraMovePrompt: metadata?.videoCameraMovePrompt,
         videoStartFrameNodeId: startFrame,
@@ -521,7 +525,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         runningHub,
         model,
         quality: generationDefaults.quality || requestedConfig.quality,
-        size: generationDefaults.size ?? requestedConfig.size,
+        size: mode === "video" && requirements?.input && videoRequiresAdaptiveFrameRatio(model, resolveVideoOperationForModel(config, model, requirements.input, requirements.videoOperation)) ? "adaptive" : generationDefaults.size ?? requestedConfig.size,
         transparentBackground: generationDefaults.transparentBackground || (requestedConfig.transparentBackground === "true" ? "true" : "false"),
         videoSeconds: generationDefaults.videoSeconds ?? requestedConfig.videoSeconds,
         vquality: generationDefaults.vquality ?? requestedConfig.vquality,

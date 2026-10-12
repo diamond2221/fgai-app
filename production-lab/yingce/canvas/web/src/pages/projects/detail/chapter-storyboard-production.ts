@@ -2,6 +2,7 @@ import type { StoryboardRow } from "@/types/canvas";
 import { formatShotOrdinal } from "@/lib/shot-label";
 import type { ProjectDetail, ShotRevisionInput } from "@/services/api/projects";
 import { ensureShotAssetMentionPrompt } from "./workflow-shot-references";
+import type { DramaProductionPlan } from "@/lib/short-drama-production";
 
 export type ChapterStoryboardAsset = {
     id: string;
@@ -74,7 +75,7 @@ export function chapterStoryboardAssets(detail: ProjectDetail): ChapterStoryboar
     }).slice(0, 60);
 }
 
-export function storyboardRowsToProjectShots(rows: StoryboardRow[], detail?: ProjectDetail): ProjectShotReplacementInput[] {
+export function storyboardRowsToProjectShots(rows: StoryboardRow[], detail?: ProjectDetail, productionPlan?: DramaProductionPlan): ProjectShotReplacementInput[] {
     const versionByAssetId = new Map((detail?.assets || []).flatMap((asset) => asset.primaryVersionId ? [[asset.id, asset.primaryVersionId] as const] : []));
     const mentionReferenceByAssetId = new Map((detail?.assets || []).map((asset) => [asset.id, {
         assetId: asset.id,
@@ -107,7 +108,10 @@ export function storyboardRowsToProjectShots(rows: StoryboardRow[], detail?: Pro
                 videoPrompt: ensureShotAssetMentionPrompt(row.videoMotionPrompt, mentionReferences),
                 negativePrompt: row.negativePrompt.trim(),
                 continuityNotes: row.continuityOut.trim(),
-                actionBeats: row.timeBeats.trim() ? [{ description: row.timeBeats.trim() }] : [],
+                actionBeats: [
+                    ...(row.timeBeats.trim() ? [{ description: row.timeBeats.trim() }] : []),
+                    ...(productionPlan ? [{ type: "drama_video_segment", productionPlan }] : []),
+                ],
             },
         };
     });

@@ -211,7 +211,7 @@ function logicalModelCompatibilityError(spec: NonNullable<NonNullable<AiConfig["
         if (!constraint && count > 0) return `不支持${kind}输入`;
         if (constraint && (count < constraint.min || count > constraint.max)) return `${kind}输入需为 ${constraint.min}-${constraint.max} 个`;
     }
-    const operation = requirements.capability === "video" && input ? resolveVideoOperation(input, requirements.videoOperation) : requirements.videoOperation;
+    const operation = requirements.capability === "video" && input ? preferredVideoOperation(spec.operations || [], input, requirements.videoOperation) : requirements.videoOperation;
     if (operation && spec.operations?.length && !spec.operations.includes(operation)) return "不支持当前生成模式";
     // 图片创作状态也会携带全局默认视频时长；这个字段只对视频模型有意义，
     // 不能把它拼进图片逻辑模型的能力匹配，否则图片模型会被误判为“不支持当前时长”。
@@ -428,7 +428,7 @@ export function inferVideoOperation(input: ModelInputSummary) {
 }
 
 export function resolveVideoOperation(input: ModelInputSummary, storedOperation?: string) {
-    if (storedOperation && !["text_to_video", "image_to_video", "audio_to_video", "extend", "reference_to_video"].includes(storedOperation)) return storedOperation;
+    if (storedOperation && storedOperation !== "text_to_video") return storedOperation;
     return inferVideoOperation(input);
 }
 
@@ -436,8 +436,19 @@ export function resolveVideoOperation(input: ModelInputSummary, storedOperation?
 // start/end frames. Resolve using its explicit capability contract.
 export function resolveVideoOperationForModel(config: AiConfig, model: string, input: ModelInputSummary, storedOperation?: string) {
     const operations = modelCapabilityConfigFor(config, model).video?.operations || [];
-    if (operations.length === 1 && operations[0] === "reference_to_video" && input.imageCount + input.characterCount > 0 && input.videoCount === 0 && input.audioCount === 0) return "reference_to_video";
-    return resolveVideoOperation(input, storedOperation);
+    return preferredVideoOperation(operations, input, storedOperation);
+}
+
+export function videoRequiresAdaptiveFrameRatio(model: string, operation?: string) {
+    return operation === "image_to_video" && /seedance.*2[.-]5/i.test(model);
+}
+
+function preferredVideoOperation(operations: string[], input: ModelInputSummary, storedOperation?: string) {
+    const hasMedia = input.imageCount + input.characterCount + input.videoCount + input.audioCount > 0;
+    if (!hasMedia && ["reference_to_video", "image_to_video"].includes(storedOperation || "") && operations.includes("text_to_video")) return "text_to_video";
+    if (storedOperation && storedOperation !== "text_to_video") return storedOperation;
+    if (hasMedia && operations.includes("reference_to_video")) return "reference_to_video";
+    return inferVideoOperation(input);
 }
 
 function videoOperationLabel(operation: string) {

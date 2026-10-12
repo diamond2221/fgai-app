@@ -1,5 +1,6 @@
 import { ImageSizePicker } from "@/components/image-size-picker";
 import { FGPricePreview } from "@/components/fg-price-preview";
+import { dramaPlanFromBeats } from "@/lib/short-drama-production";
 import { imageResolutionUsesQuality } from "@/lib/image-size-presets";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -15,7 +16,7 @@ import { CanvasResourceMentionTextarea } from "@/components/canvas/canvas-resour
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { ModelPicker } from "@/components/model-picker";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
-import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationOptions } from "@/lib/model-capabilities";
+import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationAllowed, videoDurationOptions } from "@/lib/model-capabilities";
 import { imageQualityLabel } from "@/lib/image-quality";
 import { modelQuoteDescription, modelQuoteRequest } from "@/lib/model-pricing";
 import { customShotTitle, formatShotOrdinal, normalizeDefaultShotTitle } from "@/lib/shot-label";
@@ -119,7 +120,8 @@ export default function WorkflowProductionWorkbench(props: Props) {
     const previewArtifact = artifacts.find((item) => item.id === previewArtifactId) || newestArtifact;
     const generationCapability = activeStage === "video" ? "video" as const : "image" as const;
     const modelOptions = useMemo(() => selectableModelsByCapability(effectiveConfig, generationCapability), [effectiveConfig, generationCapability]);
-    const projectDefaultModel = generationCapability === "video" ? detail.project.defaultVideoModel : detail.project.defaultImageModel;
+    const segmentPlan = dramaPlanFromBeats(revision?.actionBeatsJson || "");
+    const projectDefaultModel = generationCapability === "video" ? segmentPlan?.model || detail.project.defaultVideoModel : detail.project.defaultImageModel;
     const globalDefaultModel = generationCapability === "video" ? effectiveConfig.videoModel : effectiveConfig.imageModel;
     const defaultModel = projectDefaultModel && configuredModelMatchesCapability(effectiveConfig, projectDefaultModel, generationCapability) ? projectDefaultModel : globalDefaultModel;
     const initialModel = defaultModel || modelOptions[0] || "";
@@ -234,7 +236,7 @@ export default function WorkflowProductionWorkbench(props: Props) {
     useEffect(() => {
         const shotDurationSeconds = Math.max(0.5, (revision?.durationMs || selectedShot?.durationMs || 3000) / 1000);
         const currentModel = selectedModelRef.current || initialModel;
-        const normalizedDurationSeconds = generationCapability === "video" && currentModel
+        const normalizedDurationSeconds = generationCapability === "video" && currentModel && !segmentPlan
             ? Number(normalizeVideoValue(modelCapabilityConfigFor(effectiveConfig, currentModel).video!, { seconds: String(shotDurationSeconds) }).seconds)
             : shotDurationSeconds;
         const videoPrompt = ensureShotAssetMentionPrompt(revision?.videoPrompt || "", shotAssetReferenceContext.mentionReferences);
@@ -258,6 +260,11 @@ export default function WorkflowProductionWorkbench(props: Props) {
     }, [effectiveConfig, form, generationCapability, initialModel, revision?.id, selectedShot?.id, shotAssetReferenceContext.mentionReferences]);
 
     const changeGenerationModel = (nextModel: string) => {
+        const nextProfile = modelCapabilityConfigFor(effectiveConfig, nextModel);
+        if (segmentPlan && generationCapability === "video" && nextProfile.video && !videoDurationAllowed(nextProfile.video, Number(form.getFieldValue("durationSeconds") || generationSeconds))) {
+            message.warning("该模型不支持当前剧情片段时长，请先重新划分片段或选择支持该时长的模型");
+            return;
+        }
         selectedModelRef.current = nextModel;
         setSelectedModel(nextModel);
         const profile = modelCapabilityConfigFor(effectiveConfig, nextModel);
@@ -290,7 +297,7 @@ export default function WorkflowProductionWorkbench(props: Props) {
                 position: selectedShot.position,
                 durationMs: Math.round(values.durationSeconds * 1000),
                 status: selectedShot.status,
-                revision: revisionInput(values),
+                revision: revisionInput(values, revision?.actionBeatsJson),
             });
         },
         onSuccess: async () => { setEditorDirty(false); await onRefresh(); message.success("镜头脚本已保存为新版本"); },
@@ -342,13 +349,13 @@ export default function WorkflowProductionWorkbench(props: Props) {
                 position: submittingShot.position,
                 durationMs: Math.round(values.durationSeconds * 1000),
                 status: submittingShot.status,
-                revision: revisionInput(values),
+                revision: revisionInput(values, revision?.actionBeatsJson),
             });
             const mode = generationCapability;
             const config = { ...generationConfig, videoSeconds: String(Math.max(1, Math.round(values.durationSeconds))) };
             if (!isAiConfigReady(config, routedModel)) throw new Error("当前模型渠道配置不完整，请先到设置中补齐");
             const basePrompt = mode === "video"
-                ? [values.videoPrompt || values.plotDescription, values.action, values.dialogue && `台词：${values.dialogue}`, values.continuityNotes].filter(Boolean).join("\n")
+                ? values.videoPrompt?.trim().startsWith("【分镜】") ? values.videoPrompt.trim() : [values.videoPrompt || values.plotDescription, values.action, values.dialogue && `台词：${values.dialogue}`, values.continuityNotes].filter(Boolean).join("\n")
                 : [values.imagePrompt || values.plotDescription, values.action, "黑白分镜草图，清晰动作节拍，电影构图"].filter(Boolean).join("\n");
             const resolvedPrompt = resolveShotAssetMentionPrompt(basePrompt, shotAssetReferenceContext, { dialogue: values.dialogue });
             const skillExecution = await skillRuntime.prepare({
@@ -743,8 +750,11 @@ function TimelineShot({ artifactType, detail, shot, task, submitting, index, sel
     return <button type="button" className={`workflow-timeline-shot ${selected ? "is-active" : ""}`} onClick={onSelect}><span className="workflow-timeline-media">{preview?.resourceId && preview.type !== "video" ? <img src={resourceFileUrl(preview.resourceId)} alt="" loading="lazy" /> : <Film />}</span><span className="workflow-timeline-copy"><span className="workflow-timeline-heading"><strong>{formatShotOrdinal(index)}</strong><b>{formatDuration(shot.durationMs)}</b></span>{customShotTitle(shot.title, index) ? <em className="workflow-timeline-title">{customShotTitle(shot.title, index)}</em> : null}<small className="workflow-timeline-meta">{cameraMeta}</small><span className="workflow-timeline-status"><span>{stageLabel}{stateArtifact ? ` · v${stateArtifact.version}` : ""}</span><ArtifactStatus artifact={stateArtifact} taskStatus={submitting ? "queued" : task?.status} compact /></span></span></button>;
 }
 
-function revisionInput(values: ShotEditorValues): ShotRevisionInput {
+function revisionInput(values: ShotEditorValues, actionBeatsJson?: string): ShotRevisionInput {
+    let actionBeats: Array<Record<string, unknown>> = [];
+    try { const parsed: unknown = JSON.parse(actionBeatsJson || "[]"); if (Array.isArray(parsed)) actionBeats = parsed; } catch { /* Historical revisions may have no beat payload. */ }
     return {
+        actionBeats,
         plotDescription: values.plotDescription,
         action: values.action,
         dialogue: values.dialogue,

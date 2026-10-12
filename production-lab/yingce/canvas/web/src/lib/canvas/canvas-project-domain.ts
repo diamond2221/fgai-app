@@ -104,17 +104,17 @@ export function cinematicStoryboardColumns(columns?: StoryboardColumn[]): Storyb
 // 分镜文本任务的模型侧输出契约，字段与 storyboardRowsFromTask 的解析结构一一对应。
 // 后端只有带 metadata.promptTemplateOperation 的任务才会编译服务端分镜模板（含 JSON 契约），
 // 章节分镜走的是自定义 prompt，缺这段约束时模型会按自然语言习惯返回 Markdown 表格，解析阶段拿不到 rows。
-export function storyboardRowsOutputContract(requirement: string) {
+export function storyboardRowsOutputContract(requirement: string, videoSegments = false) {
     return [
         "【受保护输出契约】",
         "- 只返回一个 JSON 对象，不要 Markdown、表格、代码块、注释或任何解释文字。",
-        `- 顶层固定为 {"title": string, "rows": object[]}，rows 至少 1 项。${requirement}`,
-        "- rows 每项对应一个镜头，按剧情顺序排列；字段缺失时填空字符串或空数组，不要省略字段：",
+        `- 顶层固定为 {"title": string, ${videoSegments ? '"skillAttribution": string, ' : ''}"rows": object[]}，rows 至少 1 项。${requirement}`,
+        videoSegments ? "- rows 每项对应一个完整视频片段，可包含多个内部镜头，按剧情顺序排列；字段缺失时填空字符串或空数组，不要省略字段：" : "- rows 每项对应一个镜头，按剧情顺序排列；字段缺失时填空字符串或空数组，不要省略字段：",
         "  shotNumber（整数，从 1 递增）、durationSeconds（整数，1-60）、plotDescription（本镜可见的剧情与关键动作）、",
-        "  dialogue（本镜实际念出的台词或简短旁白，超长必须拆镜）、characters（本镜出现的角色名数组）、",
+        videoSegments ? '  dialogue（本片段完整原文对白，注明说话人）、characters（对象数组，每项 {characterName, characterAssetId?, characterVersionId?}，ID 只能来自提供的已确认角色）、assetBindings（对象数组，每项 {nodeId, role, priority}，nodeId 只能来自资产清单，role 为 character/environment/prop/audio/style 等合法用途，priority 从 1 递增）、' : "  dialogue（本镜实际念出的台词或简短旁白，超长必须拆镜）、characters（本镜出现的角色名数组）、",
         "  narrativeIntent、viewerPOV、performanceBlocking、shotSize（景别）、emotion、lightingAndAtmosphere、",
         "  audioEffects、camera、motion、timeBeats、imageGenerationPrompt（首帧画面提示词）、",
-        "  videoMotionPrompt（运镜与结尾状态）、continuityOut、negativePrompt、",
+        videoSegments ? "  videoMotionPrompt（包含站位、内部镜头、完整对白、声线与固定声明的完整提示词）、continuityOut、negativePrompt、" : "  videoMotionPrompt（运镜与结尾状态）、continuityOut、negativePrompt、",
         "  mustHave（数组，最多 3 项）、optionalDetails（数组）。",
         "- 镜头数量以完整覆盖剧情因果、人物关系和关键台词为准，不要为压缩数量删减关键情节。",
     ].join("\n");
@@ -132,15 +132,15 @@ export function stripProjectStyleExecutionBlocks(prompt: string): string {
 // 否则模型按自然语言习惯返回 Markdown 表格或直接续写正文，解析阶段拿不到 rows。
 // 镜头数与每镜时长只能写进契约文本：后端 canvasGenerationInput 不读 input.shotCount / shotDurationSeconds，
 // 仅放进 input 时节点上的「N 镜」「每镜 N 秒」对模型不可见。
-export function withStoryboardOutputContract(prompt: string, options: { shotCount?: number; shotDurationSeconds?: number } = {}) {
+export function withStoryboardOutputContract(prompt: string, options: { shotCount?: number; shotDurationSeconds?: number; videoSegments?: boolean } = {}) {
     const shotCount = Math.trunc(Number(options.shotCount) || 0);
     const shotDurationSeconds = Math.trunc(Number(options.shotDurationSeconds) || 0);
     const requirement = [
         shotCount > 0 ? `全片共 ${shotCount} 个镜头` : "",
         shotDurationSeconds > 0 ? `每镜约 ${shotDurationSeconds} 秒，durationSeconds 填写该值` : "",
-        "每个镜头必须能独立用于生成首帧图片和镜头视频。",
+        options.videoSegments ? "每个片段是一次完整视频生成，包含实际首帧与多个内部镜头，不将内部镜头另拆成生成任务" : "每个镜头必须能独立用于生成首帧图片和镜头视频。",
     ].filter(Boolean).join("；");
-    return [prompt, storyboardRowsOutputContract(requirement)].join("\n\n");
+    return [prompt, storyboardRowsOutputContract(requirement, options.videoSegments)].join("\n\n");
 }
 
 // 文本任务的 result_json 外层是 {mode, reasoning, text} 包装，分镜表在 text 字段的内层 JSON 字符串里；

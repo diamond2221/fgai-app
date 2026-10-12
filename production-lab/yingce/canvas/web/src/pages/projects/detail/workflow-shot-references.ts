@@ -98,6 +98,10 @@ export function resolveShotAssetMentionPrompt(prompt: string, context: ShotAsset
         return label;
     });
     if (unresolved.size) throw new Error(`提示词中的 ${Array.from(unresolved).join("、")} 未绑定到当前镜头，请重新选择资产或删除引用`);
+    if (resolved.trim().startsWith("【分镜】")) {
+        const mediaBindings = context.assetReferences.map(reference => `${reference.title}身份或外观参考图片${reference.imageIndex}${reference.audioIndex ? `，音色参考音频${reference.audioIndex}` : ""}`).join("；");
+        return mediaBindings ? resolved.trim().replace("人物站位：", `人物站位：${mediaBindings}。`) : resolved.trim();
+    }
     const dialogueContext = withShotDialogue(context.assetReferences, options.dialogue);
     const assetBlock = compileShotAssetReferencePrompt(dialogueContext.references);
     const dialogueBlock = dialogueContext.unassignedDialogue ? `【镜头台词】\n\n${dialogueContext.unassignedDialogue}` : "";
@@ -110,6 +114,7 @@ export function ensureShotAssetMentionPrompt(prompt: string, references: Array<P
     const mentionedAssetIds = new Set(Array.from(value.matchAll(/@\[asset:([^\]]+)\]/g), (match) => match[1]));
     const missing = references.filter((reference): reference is typeof reference & { assetId: string } => Boolean(reference.assetId && !mentionedAssetIds.has(reference.assetId)));
     if (!missing.length) return value;
+    if (value.startsWith("【分镜】")) return value.replace("人物站位：", `人物站位：${missing.map(reference => `${reference.title || reference.label}参考@[asset:${reference.assetId}]`).join("；")}。`);
     const block = (title: string, items: typeof missing) => items.length
         ? [title, ...items.map((reference) => `${reference.title || reference.label}：@[asset:${reference.assetId}]`)].join("\n")
         : "";

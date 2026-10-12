@@ -11,7 +11,8 @@ import { PROMPT_EDITOR_VIEWPORT_MARGIN } from "@/lib/canvas/canvas-prompt-editor
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { modelQuoteDescription, modelQuoteRequest } from "@/lib/model-pricing";
-import { modelRequestOptions, defaultImageParamsForModel, type ModelRequirements } from "@/lib/model-selection";
+import { modelRequestOptions, defaultImageParamsForModel, resolveVideoOperationForModel, type ModelRequirements } from "@/lib/model-selection";
+import { CanvasVideoModePicker } from "./canvas-video-mode-picker";
 import { navigateToSettings } from "@/lib/settings-navigation";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -164,6 +165,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
     const config = buildNodeConfig(globalConfig, node, mode, requirements);
     const resolvedRequirements: ModelRequirements = {
         ...requirements,
+        videoOperation: mode === "video" ? resolveVideoOperationForModel(config, config.model, requirements.input!, requirements.videoOperation) : undefined,
         options: modelRequestOptions(config, mode),
         videoSeconds: mode === "video" ? config.videoSeconds : undefined,
     };
@@ -461,6 +463,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                         showConfiguredModelName
                     />
                 </div>
+                {mode === "video" ? <CanvasVideoModePicker config={config} input={requirements.input!} operation={node.metadata?.videoEditOperation} imageIds={activeReferences.filter(item => item.kind === "image" || item.kind === "character").map(item => item.nodeId)} onChange={patch => onConfigChange(node.id, patch)} /> : null}
                 <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1">
                     <ReferenceToolsPopover
                         canAutoMention={canAutoMention}
@@ -521,6 +524,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                     ) : mode === "video" ? (
                         <CanvasVideoSettingsPopover
                             config={config}
+                            referenceOperation={resolvedRequirements.videoOperation}
                             buttonClassName="canvas-node-composer-settings-trigger [&>span]:min-w-0 [&_.lucide]:!size-3"
                             onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
                         />
@@ -622,7 +626,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                     </button>
                     {paramsExpanded ? (
                         <div className="pt-1">
-                            <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
+                            <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} referenceMode={resolvedRequirements.videoOperation === "reference_to_video" ? "all" : "frames"} referenceSummary={{ imageCount: requirements.input!.imageCount + requirements.input!.characterCount, videoCount: requirements.input!.videoCount, audioCount: requirements.input!.audioCount }} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
                         </div>
                     ) : null}
                 </div>
@@ -656,7 +660,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                         {renderPromptEditor(true, Boolean(expandedModalSize))}
                         {hasVideoPromptTools ? (
                             <div className="canvas-node-composer-parameters shrink-0">
-                                <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
+                                <CanvasVideoPromptTools metadata={node.metadata} frameOptions={videoFrameOptions} referenceMode={resolvedRequirements.videoOperation === "reference_to_video" ? "all" : "frames"} referenceSummary={{ imageCount: requirements.input!.imageCount + requirements.input!.characterCount, videoCount: requirements.input!.videoCount, audioCount: requirements.input!.audioCount }} onMetadataChange={(patch) => onConfigChange(node.id, patch)} />
                             </div>
                         ) : null}
                         <div className="shrink-0">{renderComposerControls(true)}</div>

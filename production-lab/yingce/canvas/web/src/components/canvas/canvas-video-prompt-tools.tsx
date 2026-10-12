@@ -40,7 +40,7 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
 
     const setFrame = (key: "videoStartFrameNodeId" | "videoEndFrameNodeId", value: string) => {
         const next = value === EMPTY_FRAME_VALUE ? undefined : value;
-        onMetadataChange(key === "videoStartFrameNodeId" ? { videoStartFrameNodeId: next } : { videoEndFrameNodeId: next });
+        onMetadataChange({ videoEditOperation: "image_to_video", ...(key === "videoStartFrameNodeId" ? { videoStartFrameNodeId: next } : { videoEndFrameNodeId: next }) });
     };
 
     if (referenceMode === "all") {
@@ -56,12 +56,12 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
                 className="flex min-h-8 min-w-0 items-center gap-2 rounded-md px-2 py-1.5"
                 data-canvas-no-zoom
                 style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
-                title="已连接的图片、视频和音频会按工作流字段映射传入"
+                title="已连接的图片、视频和音频会按模型支持的参考素材类型传入"
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >
                 <ImageIcon className="size-3.5 shrink-0 opacity-80" />
-                <span className="shrink-0 text-[var(--fs-tiny)] font-medium">工作流参考</span>
+                <span className="shrink-0 text-[var(--fs-tiny)] font-medium">全能参考</span>
                 <span className="min-w-0 truncate text-[var(--fs-micro)] opacity-65">{summary || "尚未连接媒体"}</span>
             </div>
         );

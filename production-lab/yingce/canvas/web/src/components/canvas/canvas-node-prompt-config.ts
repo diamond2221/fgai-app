@@ -3,7 +3,7 @@
 import { type CanvasNodeData, CanvasNodeType } from "@/types/canvas";
 import { Video } from "lucide-react";
 import { type AiConfig, defaultConfig } from "@/stores/use-config-store";
-import { type ModelRequirements, resolveCompatibleModel, resolveModelGenerationDefaults } from "@/lib/model-selection";
+import { type ModelRequirements, resolveCompatibleModel, resolveModelGenerationDefaults, resolveVideoOperationForModel, videoRequiresAdaptiveFrameRatio } from "@/lib/model-selection";
 import { canonicalGenerationMetadata } from "@/lib/canvas/generation-contract";
 import { resolveCanvasGenerationModel } from "@/lib/canvas/canvas-project-generation";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
@@ -62,7 +62,7 @@ export function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mo
         ...globalConfig,
         model,
         quality: defaults.quality ?? globalConfig.quality ?? defaultConfig.quality,
-        size: defaults.size ?? globalConfig.size ?? defaultConfig.size,
+        size: mode === "video" && requirements.input && videoRequiresAdaptiveFrameRatio(model, resolveVideoOperationForModel(globalConfig, model, requirements.input, requirements.videoOperation)) ? "adaptive" : defaults.size ?? globalConfig.size ?? defaultConfig.size,
         transparentBackground: defaults.transparentBackground ?? "false",
         videoSeconds: defaults.videoSeconds ?? normalizeVideoDuration(globalConfig.videoSeconds ?? defaultConfig.videoSeconds),
         vquality: defaults.vquality ?? normalizeVideoResolution(globalConfig.vquality || defaultConfig.vquality),
