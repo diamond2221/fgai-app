@@ -295,6 +295,9 @@ func applyRoutedProviderSelection(input map[string]any, routed *RoutedModel) map
 	}
 	nextConfig["providerModelKey"] = firstNonEmpty(providerModelKey, routed.ChannelModel.ModelKey)
 	input["config"] = nextConfig
+	if profile, err := normalizedChannelModelCapability(&routed.ChannelModel); err == nil {
+		applyChapterStoryboardOutputBudget(input, profile)
+	}
 	return input
 }
 
@@ -463,6 +466,7 @@ func (s *Service) resolveSystemChannelModelSelection(input map[string]any, taskT
 		capabilitySpec = &spec
 	}
 	applyChannelCapabilityDefaults(nextConfig, channelModel.Capability, capabilityConfig)
+	applyChapterStoryboardOutputBudget(input, capabilityConfig)
 	input["config"] = nextConfig
 	var declaredOptions map[string]OptionConstraint
 	if capabilitySpec != nil {

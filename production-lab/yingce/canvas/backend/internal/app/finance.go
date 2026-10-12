@@ -704,6 +704,9 @@ func estimatedTokens(value []byte) int64 {
 }
 
 func maxOutputTokens(payload map[string]any) int64 {
+	if options, ok := payload["textOptions"].(map[string]any); ok && options["maxOutputTokens"] != nil {
+		return maxOutputTokens(options)
+	}
 	for _, key := range []string{"max_output_tokens", "max_tokens", "maxOutputTokens"} {
 		value, err := strconv.ParseInt(strings.TrimSpace(fmt.Sprint(payload[key])), 10, 64)
 		if err == nil && value > 0 {

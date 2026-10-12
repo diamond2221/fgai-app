@@ -213,6 +213,16 @@ func applyTextOutputLimit(body map[string]interface{}, limit int, field string) 
 	}
 }
 
+func textTaskOutputLimit(input canvasGenerationInput) int {
+	if input.TextOptions.MaxOutputTokens <= 0 && os.Getenv("CANVAS_FG_TEAM_WORKSPACE") == "true" {
+		input.TextOptions.MaxOutputTokens = 16384
+		if metadataString(input.Metadata, "source") == "short-drama-chapter-storyboard" {
+			input.TextOptions.MaxOutputTokens = 64000
+		}
+	}
+	return agentStepOutputLimit(input)
+}
+
 func claudeTextContent(input canvasGenerationInput) (interface{}, error) {
 	if len(input.ReferenceImages) == 0 {
 		return input.Prompt, nil

@@ -168,6 +168,9 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 		// transport-specific fixed token count when the model declares one.
 		input.MaxOutputTokens = input.Config.CapabilityConfig.Text.MaxOutputTokens
 	}
+	if input.Mode == "text" {
+		input.MaxOutputTokens = textTaskOutputLimit(input)
+	}
 	var textPublisher *taskTextStreamPublisher
 	if input.Mode == "text" && strings.HasPrefix(taskType, "canvas_text") {
 		requestedStream := input.TextOptions.Stream == nil || *input.TextOptions.Stream
@@ -405,6 +408,12 @@ func (s *Service) resolveProviderConfig(config providerConfig) (providerConfig, 
 	config.ChannelModelKey = modelKey
 	config.ProviderModelKey = providerModelKey
 	config.Model = firstNonEmpty(providerModelKey, channelModel.ProviderModelKey, modelKey)
+	if normalizeCapability(channelModel.Capability) == "text" {
+		config.CapabilityConfig, err = normalizedChannelModelCapability(channelModel)
+		if err != nil {
+			return providerConfig{}, err
+		}
+	}
 	return config, nil
 }
 

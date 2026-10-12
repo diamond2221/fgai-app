@@ -192,7 +192,7 @@ function normalizeStoryboardRow(row: Partial<StoryboardRow>): Partial<Storyboard
     return {
         ...row,
         plotDescription: normalizeStoryboardText(row.plotDescription),
-        dialogue: normalizeStoryboardText(row.dialogue),
+        dialogue: normalizeStoryboardText(row.dialogue).replace(/\\r\\n|\\n/g, "\n"),
         narrativeIntent: normalizeStoryboardText(row.narrativeIntent),
         viewerPOV: normalizeStoryboardText(row.viewerPOV),
         performanceBlocking: normalizeStoryboardText(row.performanceBlocking),
@@ -204,7 +204,7 @@ function normalizeStoryboardRow(row: Partial<StoryboardRow>): Partial<Storyboard
         motion: normalizeStoryboardText(row.motion),
         timeBeats: normalizeStoryboardText(row.timeBeats),
         imageGenerationPrompt: normalizeStoryboardText(row.imageGenerationPrompt),
-        videoMotionPrompt: normalizeStoryboardText(row.videoMotionPrompt),
+        videoMotionPrompt: normalizeStoryboardText(row.videoMotionPrompt).replace(/\\r\\n|\\n/g, "\n"),
         continuityOut: normalizeStoryboardText(row.continuityOut),
         negativePrompt: normalizeStoryboardText(row.negativePrompt),
     };

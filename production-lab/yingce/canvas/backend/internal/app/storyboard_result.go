@@ -6,6 +6,28 @@ import (
 	"yingce/backend/internal/model"
 )
 
+// Persist the same bounded budget before quoting and executing the task. Long
+// chapter prompts duplicate dialogue in the script and need more than 16K.
+func applyChapterStoryboardOutputBudget(input map[string]any, profile *ModelCapabilityConfig) {
+	metadata, _ := input["metadata"].(map[string]any)
+	if input["mode"] != "text" || metadataString(metadata, "source") != "short-drama-chapter-storyboard" || profile == nil || profile.Text == nil {
+		return
+	}
+	limit := min(64000, profile.Text.MaxOutputTokens)
+	if limit <= 0 {
+		return
+	}
+	options, _ := input["textOptions"].(map[string]any)
+	if options == nil {
+		options = map[string]any{}
+	}
+	if requested := intValue(options["maxOutputTokens"]); requested > 0 {
+		limit = min(limit, requested)
+	}
+	options["maxOutputTokens"] = limit
+	input["textOptions"] = options
+}
+
 // Never mark a truncated chapter storyboard successful or import a partial batch.
 func (s *Service) validateStoryboardTaskResult(task model.Task, result map[string]interface{}) error {
 	if task.Type != "canvas_text" {
