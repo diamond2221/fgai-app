@@ -1,6 +1,6 @@
 export type GeminiImageGenerationConfig = {
     responseModalities: ["TEXT", "IMAGE"];
-    imageConfig?: { aspectRatio?: string; imageSize?: "1K" | "2K" | "4K" };
+    imageConfig?: { aspectRatio?: string; imageSize?: "512px" | "1K" | "2K" | "4K" };
 };
 
 export type GeminiInlineImage = {
@@ -9,6 +9,7 @@ export type GeminiInlineImage = {
 };
 
 const GEMINI_IMAGE_SIZES: Record<string, GeminiInlineImageGenerationSize> = {
+    "512px": "512px",
     low: "1K",
     medium: "2K",
     high: "4K",
@@ -17,7 +18,7 @@ const GEMINI_IMAGE_SIZES: Record<string, GeminiInlineImageGenerationSize> = {
     "4k": "4K",
 };
 
-type GeminiInlineImageGenerationSize = "1K" | "2K" | "4K";
+type GeminiInlineImageGenerationSize = "512px" | "1K" | "2K" | "4K";
 
 export function parseGeminiImageDataUrl(dataUrl: string): GeminiInlineImage {
     const match = dataUrl.trim().match(/^data:([^;,\s]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=_-]+)$/i);

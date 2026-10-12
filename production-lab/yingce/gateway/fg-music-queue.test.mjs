@@ -14,3 +14,19 @@ test('ordinary members cannot claim or complete another member music job',async(
   assert.equal(accepted,true);assert.equal(status,403);assert.equal(output.data,null);
  }
 });
+test('music playback cannot disclose another member resource to a non-reviewer',async()=>{
+ const pool={async query(){return {rows:[{owner_id:'alice',status:'succeeded',resource_id:'private'}]};}};
+ let status;const res={writeHead(value){status=value;},end(){}};
+ await musicQueueRoute({method:'GET'},res,{pool,actor:{id:'bob',reviewer:false},path:new URL('http://fg/api/fg/music/jobs/00000000-0000-4000-a000-000000000001/access'),ownerAPI(){throw Error('must not access owner files');}});
+ assert.equal(status,404);
+});
+
+test('single music job lookup preserves owner isolation beyond the recent queue',async()=>{
+ const pool={async query(){return {rows:[{id:'job',owner_id:'alice',status:'succeeded',resource_id:'private',brief:{title:'saved'}}]};}};
+ for(const actor of [{id:'alice',reviewer:false},{id:'bob',reviewer:false}]){
+  let status,output;const res={writeHead(value){status=value;},end(value){output=JSON.parse(value);}};
+  await musicQueueRoute({method:'GET'},res,{pool,actor,path:new URL('http://fg/api/fg/music/jobs/00000000-0000-4000-a000-000000000001')});
+  assert.equal(status,actor.id==='alice'?200:404);
+  if(actor.id==='alice')assert.equal(output.data.resourceId,'private');else assert.equal(output.data,null);
+ }
+});

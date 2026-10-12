@@ -23,12 +23,12 @@ func validateTextCapabilityConfig(value *TextCapabilityConfig) error {
 	if value.MaxOutputTokens < 256 || value.MaxOutputTokens > 1000000 || value.MaxOutputTokens >= value.ContextWindowTokens {
 		return BadAuthRequest("文本模型最大输出 Token 必须小于上下文窗口且在 256-1000000 之间")
 	}
-	if value.References.PromptMaxChars < 1 || value.References.PromptMaxChars > 1000000 {
-		return BadAuthRequest("提示词最大字符数必须在 1-1000000 之间")
+	if value.References.PromptMaxChars < 0 || value.References.PromptMaxChars > 1000000 {
+		return BadAuthRequest("文本提示词字符限制无效；0 表示按模型 Token 上限校验")
 	}
 	for name, number := range map[string]int{"最大图片引用数": value.References.MaxImages, "最大视频引用数": value.References.MaxVideos} {
-		if number < 0 || number > 100 {
-			return BadAuthRequest(name + "必须在 0-100 之间")
+		if number < 0 || number > 1500 {
+			return BadAuthRequest(name + "必须在 0-1500 之间")
 		}
 	}
 	if value.References.MaxImageBytes < 0 || value.References.MaxVideoBytes < 0 {
@@ -38,8 +38,8 @@ func validateTextCapabilityConfig(value *TextCapabilityConfig) error {
 }
 
 func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
-	if value.References.PromptMaxChars < 1 || value.References.PromptMaxChars > 1000000 {
-		return BadAuthRequest("提示词最大字符数必须在 1-1000000 之间")
+	if value.References.PromptMaxChars < 0 || value.References.PromptMaxChars > 1000000 {
+		return BadAuthRequest("提示词最大字符数必须在 0-1000000 之间；0 表示未声明字符上限")
 	}
 	if value.References.MaxImages < 0 || value.References.MaxImages > 100 || value.References.MaxImageBytes < 0 {
 		return BadAuthRequest("图片引用限制无效")
@@ -125,8 +125,11 @@ func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
 }
 
 func validateVideoCapabilityConfig(value *VideoCapabilityConfig) error {
-	if value.References.PromptMaxChars < 1 || value.References.PromptMaxChars > 1000000 {
-		return BadAuthRequest("提示词最大字符数必须在 1-1000000 之间")
+	if value.References.PromptMaxChars < 0 || value.References.PromptMaxChars > 1000000 {
+		return BadAuthRequest("提示词最大字符数必须在 0-1000000 之间；0 表示未声明字符上限")
+	}
+	if value.References.PromptMaxNonChineseChars < 0 || value.References.PromptMaxNonChineseChars > 1000000 || value.References.MaxInputOutputDuration < 0 || value.References.MinVideoSide < 0 || value.References.MaxVideoSide < 0 {
+		return BadAuthRequest("模型额外参考限制不能小于 0 或超过有效范围")
 	}
 	for name, number := range map[string]int{"最少图片引用数": value.References.MinImages, "最大图片引用数": value.References.MaxImages, "最大视频引用数": value.References.MaxVideos, "最大音频引用数": value.References.MaxAudios} {
 		if number < 0 || number > 100 {
@@ -289,7 +292,7 @@ func validateVideoTask(profile *VideoCapabilityConfig, input canvasGenerationInp
 	if profile == nil {
 		return BadAuthRequest("当前视频模型能力参数无效")
 	}
-	if err := validateModelPromptLength("视频", input.Prompt, profile.References.PromptMaxChars); err != nil {
+	if err := validateModelPromptLength("视频", input.Prompt, videoPromptMaxChars(profile.References, input.Prompt)); err != nil {
 		return err
 	}
 	if len(input.ReferenceImages) > profile.References.MaxImages || len(input.ReferenceVideos) > profile.References.MaxVideos || len(input.ReferenceAudios) > profile.References.MaxAudios {
@@ -301,7 +304,9 @@ func validateVideoTask(profile *VideoCapabilityConfig, input canvasGenerationInp
 	if len(input.ReferenceImages) < profile.References.MinImages {
 		return BadAuthRequest(fmt.Sprintf("当前视频模型至少需要 %d 张参考图", profile.References.MinImages))
 	}
-	if err := validateFGReferenceLimits(profile.References, input); err != nil { return err }
+	if err := validateFGReferenceLimits(profile.References, input); err != nil {
+		return err
+	}
 	for _, media := range input.ReferenceImages {
 		if profile.References.MaxImageBytes > 0 && media.Bytes > profile.References.MaxImageBytes {
 			return BadAuthRequest("参考图片文件超过当前模型大小限制")
@@ -351,6 +356,9 @@ func validateImageTask(profile *ImageCapabilityConfig, input canvasGenerationInp
 	if profile == nil {
 		return nil
 	}
+	if err := validateModelPromptLength("图片", withSystemPrompt(input.Config, input.Prompt), profile.References.PromptMaxChars); err != nil {
+		return err
+	}
 	modelName := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(input.Config.Model)), "models/")
 	if input.Config.InterfaceType == string(model.ChannelInterfaceGrokImage) && modelName == "grok-imagine-image-quality" {
 		const maxPromptBytes = 8000
@@ -378,8 +386,15 @@ func validateImageTask(profile *ImageCapabilityConfig, input canvasGenerationInp
 			return BadAuthRequest(err.Error())
 		}
 	}
-	if profile.Size.Parameter == "size" && profile.Size.Constraints != nil {
-		if err := validateFGImageDimensions(input.Config.Size, profile.Size.Constraints); err != nil { return err }
+	selectedSize := firstNonEmpty(input.Config.Size, profile.Size.Default)
+	if profile.Size.Parameter == "size" && profile.Size.Constraints != nil && selectedSize != "auto" {
+		limits := *profile.Size.Constraints
+		if len(input.ReferenceImages) > 0 && limits.MaxReferencePixels > 0 {
+			limits.MaxPixels = limits.MaxReferencePixels
+		}
+		if err := validateFGImageDimensions(selectedSize, &limits); err != nil {
+			return err
+		}
 	}
 	quality := strings.TrimSpace(input.Config.Quality)
 	if profile.Quality.Supported && quality != "" && !strings.EqualFold(quality, "auto") && !strings.EqualFold(quality, "any") && !containsCapabilityString(profile.Quality.Values, quality) {
@@ -440,7 +455,7 @@ func validateWorkflowProviderPromptLength(input canvasGenerationInput) error {
 	if input.Mode != "video" || profile == nil || profile.Video == nil {
 		return nil
 	}
-	return validateModelPromptLength("视频", input.Prompt, profile.Video.References.PromptMaxChars)
+	return validateModelPromptLength("视频", input.Prompt, videoPromptMaxChars(profile.Video.References, input.Prompt))
 }
 
 func validateModelPromptLength(label string, prompt string, maxChars int) error {

@@ -265,6 +265,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
 
     return (
         <div className="admin-channel-model-manager">
+            {channel.name === '火山语音 · FG' && <div className="mb-4 rounded-xl border p-4 text-sm leading-7" style={{borderColor:'var(--border-color)',background:'var(--surface-color)'}}><strong>火山音频：2 个生成模型与 3 项语音工具</strong><p>下表管理 Seed Audio 1.0 与豆包语音合成 2.0。实时语音识别、录音识别、文本翻译使用独立工具接口，在音频设置区操作，不作为音频生成模型列出。</p><Button href="/fg-six/fg-audio-tools">打开语音工具与音乐队列</Button></div>}
             <div className="admin-channel-model-toolbar">
                 <div>
                     <h3 className="admin-channel-model-heading">

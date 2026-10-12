@@ -85,20 +85,39 @@ export const doubaoAudioFormatOptions = [
 ];
 
 export function isDoubaoAudioConfig(config: AiConfig) {
-    return resolveModelRequestConfig(config, config.model || config.audioModel).interfaceType === "doubao-streaming-tts";
+    return resolveAudioRequestConfig(config).interfaceType === "doubao-streaming-tts";
 }
 
 export function isSeedAudioConfig(config: AiConfig) {
     return audioModelName(config) === "seed-audio-1.0" && !isDoubaoAudioConfig(config);
 }
 
+export function resolveAudioRequestConfig(config: AiConfig) {
+    const selected = resolveModelRequestConfig(config, config.model || config.audioModel);
+    const cost = config.channels.flatMap(channel => channel.modelCosts || []).find(item => item.model === selected.model);
+    return cost?.capability && cost.capability !== "audio" && config.audioModel ? resolveModelRequestConfig(config, config.audioModel) : selected;
+}
+
 function audioModelName(config: AiConfig) {
-    return resolveModelRequestConfig(config, config.model || config.audioModel).model;
+    return resolveAudioRequestConfig(config).model;
+}
+
+export function isSunoAudioConfig(config: AiConfig) {
+    return audioModelName(config) === "suno-company-music";
+}
+
+export function audioSpeedBounds(config: AiConfig) {
+    return audioModelName(config) === "seed-tts-2.0" ? {min:0.5,max:2} : {min:0.25,max:4};
+}
+
+export function normalizeAudioSpeedForConfig(config: AiConfig, value: string) {
+    const {min,max}=audioSpeedBounds(config);
+    return String(Math.max(min,Math.min(max,Number(normalizeAudioSpeedValue(value)))));
 }
 
 export function audioSettingsSummary(config: AiConfig) {
     const format = audioFormatLabelForConfig(config, config.audioFormat);
-    return isSeedAudioConfig(config) ? format : `${audioVoiceLabelForConfig(config, config.audioVoice) || "不指定音色"} · ${format} · ${audioSpeedLabel(config.audioSpeed)}`;
+    return isSunoAudioConfig(config) ? "音乐 · MP3" : isSeedAudioConfig(config) ? `提示词生成声音 · ${format}` : `${audioVoiceLabelForConfig(config, config.audioVoice) || "不指定音色"} · ${format} · ${normalizeAudioSpeedForConfig(config,config.audioSpeed)}x`;
 }
 
 export function audioVoiceOptionsForConfig(config: AiConfig) {
@@ -108,6 +127,7 @@ export function audioVoiceOptionsForConfig(config: AiConfig) {
 }
 
 export function audioFormatOptionsForConfig(config: AiConfig) {
+    if (isSunoAudioConfig(config)) return [{value:"mp3",label:"MP3"}];
     if (["seed-tts-2.0","seed-audio-1.0"].includes(audioModelName(config)) && !isDoubaoAudioConfig(config)) return [{value:"mp3",label:"MP3"},{value:"wav",label:"WAV"}];
     return isDoubaoAudioConfig(config) ? doubaoAudioFormatOptions : openAIAudioFormatOptions;
 }

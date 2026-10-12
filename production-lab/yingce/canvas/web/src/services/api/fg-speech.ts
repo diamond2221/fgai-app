@@ -6,6 +6,8 @@ export const companyMusicStatus=()=>http.get<CompanyMusicStatus>("/fg/music/stat
 export const createSpeechJob=(input:Record<string,unknown>)=>http.post<SpeechJob>("/fg/speech/jobs",input);
 export type MusicJob={id:string;ownerName?:string;status:string;resourceId?:string;clipId?:string;brief:{title:string;model:string;mode:string;voice:string;styles:string;lyrics:string;description:string};createdAt:string};
 export const musicJobs=()=>http.get<{canManage:boolean;jobs:MusicJob[]}>("/fg/music/jobs");
+export const musicJob=(id:string)=>http.get<MusicJob>(`/fg/music/jobs/${encodeURIComponent(id)}`);
+export const musicJobAccess=(id:string)=>http.get<{url:string}>(`/fg/music/jobs/${encodeURIComponent(id)}/access`);
 export const createMusicJob=(input:Record<string,unknown>)=>http.post<MusicJob>("/fg/music/jobs",input);
 export const startMusicJob=(id:string)=>http.post<MusicJob>(`/fg/music/jobs/${encodeURIComponent(id)}/start`,{});
 export const completeMusicJob=(id:string,clipId:string)=>http.post<MusicJob>(`/fg/music/jobs/${encodeURIComponent(id)}/complete`,{clipId});

@@ -87,7 +87,7 @@ export function ModelCapabilityEditor({ value, onChange, protocol, capability = 
                         <NumberField label="单个视频最长秒数" value={profile.references.maxVideoDurationSeconds} min={0} disabled={disabled} onChange={(value) => updateReferences({ maxVideoDurationSeconds: value || 0 })} />
                     </ReferenceCard>
                     <ReferenceCard title="通用限制" description="所有视频请求共用的基础约束">
-                        <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={1} disabled={disabled} onChange={(value) => updateReferences({ promptMaxChars: value || 1 })} />
+                        <NumberField label="提示词最大字符数（0 为未声明）" value={profile.references.promptMaxChars} min={0} disabled={disabled} onChange={(value) => updateReferences({ promptMaxChars: value || 0 })} />
                         <BooleanField label="水印" value={profile.watermark} disabled={disabled} onChange={(watermark) => update({ watermark })} />
                     </ReferenceCard>
                 </div>
@@ -346,7 +346,7 @@ export function ModelCapabilityEditor({ value, onChange, protocol, capability = 
 
                     <CapabilityGroup title="通用限制" description="不属于单一媒体类型的请求与输出约束">
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={1} disabled={disabled} onChange={(value) => updateReferences({ promptMaxChars: value || 1 })} />
+                            <NumberField label="提示词最大字符数（0 为未声明）" value={profile.references.promptMaxChars} min={0} disabled={disabled} onChange={(value) => updateReferences({ promptMaxChars: value || 0 })} />
                             <BooleanField label="水印" value={profile.watermark} disabled={disabled} onChange={(watermark) => update({ watermark })} />
                         </div>
                     </CapabilityGroup>
@@ -389,15 +389,15 @@ function TextCapabilityEditor({ value, onChange, protocol, disabled, section }: 
                 {contextWindowFields}
                 <div className="admin-capability-reference-grid is-three">
                     <ReferenceCard title="图片引用" description="文本模型可接收的图片范围">
-                        <NumberField label="最大参考图片数" value={profile.references.maxImages} min={0} max={100} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxImages: next || 0 })} />
+                        <NumberField label="最大参考图片数" value={profile.references.maxImages} min={0} max={1500} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxImages: next || 0 })} />
                         <NumberField label="单张图片上限 MB" value={bytesToMB(profile.references.maxImageBytes)} min={0} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxImageBytes: mbToBytes(next) })} />
                     </ReferenceCard>
                     <ReferenceCard title="视频引用" description="文本模型可接收的视频范围">
                         <NumberField label="最大参考视频数" value={profile.references.maxVideos} min={0} max={100} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxVideos: next || 0 })} />
                         <NumberField label="单个视频上限 MB" value={bytesToMB(profile.references.maxVideoBytes)} min={0} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxVideoBytes: mbToBytes(next) })} />
                     </ReferenceCard>
-                    <ReferenceCard title="通用限制" description="所有文本请求共用的基础约束">
-                        <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={1} max={1_000_000} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ promptMaxChars: next || 1 })} />
+                    <ReferenceCard title="文本输入限制" description="0 表示没有官方字符上限，仍按模型 Token 窗口校验">
+                        <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={0} max={1_000_000} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ promptMaxChars: next || 0 })} />
                     </ReferenceCard>
                 </div>
             </div>
@@ -418,7 +418,7 @@ function TextCapabilityEditor({ value, onChange, protocol, disabled, section }: 
             </CapabilityGroup>
             <CapabilityGroup title="图片" description="文本模型可接收的图片参考范围">
                 <div className="grid gap-3 sm:grid-cols-2">
-                    <NumberField label="最大参考图片数" value={profile.references.maxImages} min={0} max={100} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxImages: next || 0 })} />
+                    <NumberField label="最大参考图片数" value={profile.references.maxImages} min={0} max={1500} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxImages: next || 0 })} />
                     <NumberField label="单张图片上限 MB" value={bytesToMB(profile.references.maxImageBytes)} min={0} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxImageBytes: mbToBytes(next) })} />
                 </div>
             </CapabilityGroup>
@@ -428,8 +428,8 @@ function TextCapabilityEditor({ value, onChange, protocol, disabled, section }: 
                     <NumberField label="单个视频上限 MB" value={bytesToMB(profile.references.maxVideoBytes)} min={0} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ maxVideoBytes: mbToBytes(next) })} />
                 </div>
             </CapabilityGroup>
-            <CapabilityGroup title="通用限制" description="所有文本请求共用的基础约束">
-                <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={1} max={1_000_000} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ promptMaxChars: next || 1 })} />
+            <CapabilityGroup title="文本输入限制" description="0 表示没有官方字符上限，仍按模型 Token 窗口校验">
+                <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={0} max={1_000_000} disabled={Boolean(disabled)} onChange={(next) => updateReferences({ promptMaxChars: next || 0 })} />
             </CapabilityGroup>
         </div>
     );
@@ -452,7 +452,7 @@ function ImageCapabilityEditor({ value, onChange, protocol, model, disabled, sec
                         <ParameterField label="蒙版编辑" description="允许图片编辑接口提交 mask" supported={profile.references.maskSupported} disabled={disabled} onChange={(maskSupported) => updateReferences({ maskSupported })} />
                     </ReferenceCard>
                     <ReferenceCard title="通用限制" description="所有图片请求共用的基础约束">
-                        <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={1} disabled={disabled} onChange={(promptMaxChars) => updateReferences({ promptMaxChars: promptMaxChars || 1 })} />
+                        <NumberField label="提示词最大字符数（0 为未声明）" value={profile.references.promptMaxChars} min={0} disabled={disabled} onChange={(promptMaxChars) => updateReferences({ promptMaxChars: promptMaxChars || 0 })} />
                     </ReferenceCard>
                 </div>
             </div>
@@ -613,7 +613,7 @@ function ImageCapabilityEditor({ value, onChange, protocol, model, disabled, sec
             </CapabilityGroup>
 
             <CapabilityGroup title="通用限制" description="所有图片请求共用的基础约束">
-                <NumberField label="提示词最大字符数" value={profile.references.promptMaxChars} min={1} disabled={disabled} onChange={(promptMaxChars) => updateReferences({ promptMaxChars: promptMaxChars || 1 })} />
+                <NumberField label="提示词最大字符数（0 为未声明）" value={profile.references.promptMaxChars} min={0} disabled={disabled} onChange={(promptMaxChars) => updateReferences({ promptMaxChars: promptMaxChars || 0 })} />
             </CapabilityGroup>
         </div>
     );

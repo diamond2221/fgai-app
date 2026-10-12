@@ -8,11 +8,11 @@ WORKDIR /app
 COPY upstream/ ./
 RUN pnpm install --frozen-lockfile
 RUN pnpm krillinai:build && pnpm --filter @opencreator/daemon build && pnpm templates:compile
-RUN pnpm --filter @opencreator/daemon test -- --maxWorkers=1 --minWorkers=1 --testTimeout=30000
+RUN npm install -g @openai/codex@0.149.0 && codex --version
+RUN OPENCREATOR_GATEWAY_PROTOCOL_TEST_CODEX_BIN=/usr/local/bin/codex OPENCREATOR_GATEWAY_PROTOCOL_TEST_CODEX_SHA256=$(sha256sum /usr/local/bin/codex | cut -d ' ' -f 1) pnpm --filter @opencreator/daemon test -- --maxWorkers=1 --minWorkers=1 --testTimeout=30000
 RUN pnpm --filter @opencreator/web test -- --maxWorkers=1 --minWorkers=1 --testTimeout=30000
 ENV OPENCREATOR_WEB_BASE=/creator-static/ VITE_FG_MANAGED=1
 RUN pnpm --filter @opencreator/web build
-RUN npm install -g @openai/codex@0.149.0 && codex --version
 COPY deploy/entry.mjs /app/fg-entry.mjs
 COPY deploy/trash.mjs /app/fg-trash.mjs
 COPY deploy/recycle.mjs /app/fg-recycle.mjs

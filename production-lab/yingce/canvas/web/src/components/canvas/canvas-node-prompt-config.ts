@@ -7,6 +7,7 @@ import { type ModelRequirements, resolveCompatibleModel, resolveModelGenerationD
 import { canonicalGenerationMetadata } from "@/lib/canvas/generation-contract";
 import { resolveCanvasGenerationModel } from "@/lib/canvas/canvas-project-generation";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
+import { normalizeAudioFormatForConfig, normalizeAudioSpeedForConfig, normalizeAudioVoiceForConfig } from "@/lib/audio-generation";
 import type { CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import type { CanvasNodeGenerationMode } from "./canvas-node-prompt-panel";
 
@@ -67,9 +68,9 @@ export function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mo
         vquality: defaults.vquality ?? normalizeVideoResolution(globalConfig.vquality || defaultConfig.vquality),
         videoGenerateAudio: defaults.videoGenerateAudio ?? globalConfig.videoGenerateAudio ?? defaultConfig.videoGenerateAudio,
         videoWatermark: defaults.videoWatermark ?? globalConfig.videoWatermark ?? defaultConfig.videoWatermark,
-        audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
-        audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
-        audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
+        audioVoice: normalizeAudioVoiceForConfig({ ...globalConfig, model }, node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice),
+        audioFormat: normalizeAudioFormatForConfig({ ...globalConfig, model }, node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat),
+        audioSpeed: normalizeAudioSpeedForConfig({ ...globalConfig, model }, node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed),
         audioLanguage: node.metadata?.audioLanguage || globalConfig.audioLanguage || defaultConfig.audioLanguage,
         audioDialect: node.metadata?.audioDialect || globalConfig.audioDialect || defaultConfig.audioDialect,
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,

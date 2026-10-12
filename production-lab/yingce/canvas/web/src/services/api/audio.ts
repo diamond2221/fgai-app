@@ -1,7 +1,7 @@
-import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
+import { audioMimeType, normalizeAudioFormatForConfig, normalizeAudioSpeedForConfig, normalizeAudioVoiceForConfig, resolveAudioRequestConfig } from "@/lib/audio-generation";
 import { createChannelTransport } from "@/services/api/channel-transport";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
 
 type RequestOptions = { signal?: AbortSignal };
 
@@ -14,17 +14,17 @@ function audioTransport(config: AiConfig) {
 }
 
 export async function requestAudioGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<Blob> {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.audioModel);
+    const requestConfig = resolveAudioRequestConfig(config);
     const model = requestConfig.model.trim();
     assertAudioConfig(requestConfig, model);
-    const format = normalizeAudioFormatValue(config.audioFormat);
+    const format = normalizeAudioFormatForConfig(config,config.audioFormat);
     const instructions = config.audioInstructions.trim();
     const payload = {
         model,
         input: prompt,
-        voice: normalizeAudioVoiceValue(config.audioVoice),
+        voice: normalizeAudioVoiceForConfig(config,config.audioVoice),
         response_format: format,
-        speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
+        speed: Number(normalizeAudioSpeedForConfig(config,config.audioSpeed)),
         ...(instructions ? { instructions } : {}),
     };
 

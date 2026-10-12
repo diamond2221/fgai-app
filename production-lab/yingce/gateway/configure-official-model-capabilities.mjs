@@ -6,7 +6,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {capabilities} from './fg-model-capabilities.mjs';
 import {withNativeAdmin} from './native-admin.mjs';
 
-const keys=['wan3.0-video','gpt-image-2','gpt-image-2.5-flare','gpt-image-2.5-sunburst'];
+const keys=JSON.parse(await fs.readFile(new URL('./model-specs.json',import.meta.url),'utf8')).filter(s=>s.id!=='gemini-3.5-pro').map(s=>s.id);
 // Saving a capability increments priceVersion/updatedAt even with unchanged rates.
 const priceContract=tiers=>(tiers||[]).map(t=>Object.fromEntries(['resolution','videoSeconds','providerModelKey','billingMode','unitPriceMicrocredits','inputTokenPriceMicrocredits','outputTokenPriceMicrocredits','cachedTokenPriceMicrocredits','priceConfigured','enabled','costPricing'].map(k=>[k,t[k]])));
 // Native normalization adds optional defaults; do not rewrite an already matching profile.

@@ -56,7 +56,7 @@ export type ImageCapabilityConfig = {
         default: string;
         allowCustom: boolean;
         presets?: ImageResolutionOption[];
-        constraints?: {minPixels:number;maxPixels:number;maxRatio:number};
+        constraints?: {minPixels:number;maxPixels:number;maxRatio:number;maxSide?:number;edgeMultiple?:number;maxReferencePixels?:number};
     };
     quality: {
         supported: boolean;
@@ -72,6 +72,7 @@ export type ImageCapabilityConfig = {
 export type VideoCapabilityConfig = {
     references: {
         promptMaxChars: number;
+        promptMaxNonChineseChars?: number;
         minImages: number;
         maxImages: number;
         maxImageBytes: number;
@@ -83,6 +84,9 @@ export type VideoCapabilityConfig = {
         maxAudioDurationSeconds: number;
         minVideoDurationSeconds?: number;
         maxTotalVideoDurationSeconds?: number;
+        maxInputOutputDurationSeconds?: number;
+        minVideoSide?: number;
+        maxVideoSide?: number;
         minAudioDurationSeconds?: number;
         maxTotalAudioDurationSeconds?: number;
         minImageSide?: number;

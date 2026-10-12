@@ -23,6 +23,7 @@ import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
 import {FGSkillControl} from '@/components/fg-skill-control';
+import {FGCanvasMusic} from './fg-canvas-music';
 import { CanvasNineGridPicker } from "./canvas-nine-grid-picker";
 import { CanvasChooseImageStylePicker } from "./canvas-choose-image-style-picker";
 import { CanvasChooseEffectPicker } from "./canvas-choose-effect-picker";
@@ -524,11 +525,11 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                             onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
                         />
                     ) : mode === "audio" ? (
-                        <CanvasAudioSettingsPopover
+                        <><FGCanvasMusic prompt={prompt} jobId={node.metadata?.fgMusicJobId} onChange={patch=>onConfigChange(node.id,patch)}/><CanvasAudioSettingsPopover
                             config={config}
                             buttonClassName="canvas-node-composer-settings-trigger [&>span]:min-w-0 [&_.lucide]:!size-3"
                             onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))}
-                        />
+                        /></>
                     ) : null}
                     {renderSubmitButton(expanded)}
                 </div>

@@ -20,7 +20,9 @@ export function assertVideoCapability(
     const checkShape = (width?:number,height?:number,video=false) => {
         if (!width || !height) return;
         const ratio=width/height,pixels=width*height;
-        if ((limits.minImageSide && Math.min(width,height)<limits.minImageSide) || (limits.maxImageSide && Math.max(width,height)>limits.maxImageSide) || (limits.minImageRatio && ratio<limits.minImageRatio) || (limits.maxImageRatio && ratio>limits.maxImageRatio)) throw new Error('参考素材宽高或宽高比超出当前模型限制');
+        const minSide=video?(limits.minVideoSide||limits.minImageSide):limits.minImageSide;
+        const maxSide=video?(limits.maxVideoSide||limits.maxImageSide):limits.maxImageSide;
+        if ((minSide && Math.min(width,height)<minSide) || (maxSide && Math.max(width,height)>maxSide) || (limits.minImageRatio && ratio<limits.minImageRatio) || (limits.maxImageRatio && ratio>limits.maxImageRatio)) throw new Error('参考素材宽高或宽高比超出当前模型限制');
         if (video && ((limits.minVideoPixels && pixels<limits.minVideoPixels) || (limits.maxVideoPixels && pixels>limits.maxVideoPixels))) throw new Error('参考视频像素总量超出当前模型限制');
     };
     const checkFormat=(type:string|undefined,formats:string[]|undefined)=>{
@@ -46,6 +48,7 @@ export function assertVideoCapability(
     }
     if (limits.maxTotalVideoDurationSeconds && videoReferences.reduce((sum,v)=>sum+(v.durationMs||0),0)>limits.maxTotalVideoDurationSeconds*1000) throw new Error(`参考视频累计时长最多 ${limits.maxTotalVideoDurationSeconds} 秒`);
     if (limits.maxTotalAudioDurationSeconds && audioReferences.reduce((sum,a)=>sum+(a.durationMs||0),0)>limits.maxTotalAudioDurationSeconds*1000) throw new Error(`参考音频累计时长最多 ${limits.maxTotalAudioDurationSeconds} 秒`);
+    if (limits.maxInputOutputDurationSeconds && videoReferences.length && videoReferences.reduce((sum,v)=>sum+(v.durationMs||0),0)+Number(seconds)*1000>limits.maxInputOutputDurationSeconds*1000) throw new Error(`参考视频累计时长与生成时长合计最多 ${limits.maxInputOutputDurationSeconds} 秒`);
 }
 
 export function assertVideoConfig(config: ResolvedAiConfig, model: string) {

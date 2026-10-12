@@ -176,7 +176,7 @@ export function modelPromptLengthError(config: AiConfig, model: string, capabili
     const configuredProfile = channel.modelCosts?.find((item) => item.model === modelOptionName(model))?.capabilityConfig;
     if (!configuredProfile) return "";
     const profile = modelCapabilityConfigFor(config, model);
-    const maxChars = capability === "text" ? profile.text?.references.promptMaxChars : capability === "image" ? profile.image?.references.promptMaxChars : capability === "video" ? profile.video?.references.promptMaxChars : undefined;
+    const maxChars = capability === "text" ? profile.text?.references.promptMaxChars : capability === "image" ? profile.image?.references.promptMaxChars : capability === "video" ? (!/\p{Script=Han}/u.test(prompt) && profile.video?.references.promptMaxNonChineseChars ? profile.video.references.promptMaxNonChineseChars : profile.video?.references.promptMaxChars) : undefined;
     if (!maxChars || maxChars <= 0) return "";
     const actualChars = Array.from(prompt).length;
     if (actualChars <= maxChars) return "";

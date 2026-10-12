@@ -11,13 +11,14 @@ export const getFGFinance=()=>http.get<FGFinance>('/fg/finance');
 export const importFGFees=(csv:string)=>http.post<{rows:number;reused:boolean}>('/fg/finance/import',{csv});
 export const updateFGFx=(fx:number)=>http.put<{fx:number}>('/fg/finance/fx',{fx});
 
-export type FGStory=FGTopic&{status:'pending'|'approved'|'rejected';submitted_by:string;submitted_name:string;review_note:string;revision:number};
+export type FGStory=FGTopic&{status:'pending'|'approved'|'rejected';submitted_by:string;submitted_name:string;review_note:string;revision:number;canEdit?:boolean;review_events?:Array<{action:string;note:string;at:string}>};
 export type FGTeam={groups:Array<{id:string;name:string;member_count:number}>;users:Array<{id:string;display_name:string;email:string;platform_role:string;group_id:string|null;group_name:string|null;group_role:string|null}>;canManage:boolean;currentUserId:string;currentGroup:string|null};
 export const getFGTeam=(signal?:AbortSignal)=>http.get<FGTeam>('/fg/team',{signal});
 export const getFGStories=(signal?:AbortSignal)=>http.get<{stories:FGStory[];canReview:boolean}>('/fg/stories',{signal});
 export const submitFGStory=(story:Omit<FGTopic,'id'>)=>http.post<{id:number}>('/fg/stories',story);
 export const resubmitFGStory=(story:FGStory)=>http.put<{saved:boolean}>('/fg/stories',story);
 export const reviewFGStory=(id:number,revision:number,status:'approved'|'rejected',note:string)=>http.post('/fg/stories/review',{id,revision,status,note});
+export const archiveFGStory=(id:number,revision:number)=>http.post('/fg/stories/archive',{id,revision});
 export const createFGGroup=(name:string)=>http.post('/fg/team/groups',{name});
 export const renameFGGroup=(id:string,name:string)=>http.patch('/fg/team/groups',{id,name});
 export const archiveFGGroup=(id:string)=>http.post('/fg/team/groups/archive',{id});

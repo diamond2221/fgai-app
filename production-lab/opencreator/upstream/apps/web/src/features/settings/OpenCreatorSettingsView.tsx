@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Check, FolderOpen, Moon, Save, Sun } from 'lucide-react';
+import { Check, CircleCheck, CircleAlert, FolderOpen, Moon, Save, Sun, UserRound } from 'lucide-react';
 import type {
   CodexProfileListResponse,
   CodexStatusResponse,
@@ -34,6 +34,14 @@ import './settings-management.css';
 import type { OpenCreatorSettingsService } from '../../services/opencreator-settings-service.js';
 import { IssueList } from '../issues/IssuePresenter.js';
 import { usePageIssueState } from '../issues/page-issue-state.js';
+import './gateway-account-settings.css';
+import type { SettingsRouteTab } from '../../app/routes.js';
+import type { GatewayAccountSettingsService } from '../../services/gateway-account-service.js';
+import type { GatewayAccountState } from '@opencreator/protocol';
+import { OfficialServicesSettingsView } from './OfficialServicesSettingsView.js';
+import { NetworkSettings } from './NetworkSettings.js';
+import { PlatformConnectionsSettingsView } from './PlatformConnectionsSettingsView.js';
+import type { PlatformConnectionsService } from '../../services/platform-connections-service.js';
 
 const CreatorServicesSettingsView = lazy(async () => {
   const module = await import('./CreatorServicesSettingsView.js');
@@ -73,6 +81,12 @@ export type OpenCreatorSettingsViewProps = {
   onProfileDataChange?(data: CodexProfileListResponse): void;
   cleanupService?: CleanupSettingsService | null;
   creatorServicesService?: CreatorServicesSettingsService | null;
+  platformConnectionsService?: PlatformConnectionsService | null;
+  gatewayAccountService?: GatewayAccountSettingsService | null;
+  gatewayAccountState?: GatewayAccountState;
+  onGatewayStateChange?(state: GatewayAccountState): void;
+  onOpenPersonalCenter?(): void;
+  openExternal?(url: string): Promise<void> | void;
   codexRuntimeService?: CodexRuntimeSettingsService | null;
   agentSetupNeeded?: boolean;
   onOpenAgentSetup?(): void;
@@ -83,7 +97,7 @@ export type OpenCreatorSettingsViewProps = {
   storageSettingsService?: Pick<OpenCreatorSettingsService, 'getStorageSettings' | 'updateStorageSettings'> | null;
   onSelectStorageDirectory?(purpose: 'default-project-root' | 'output-root'): Promise<string | null>;
   codexStatus?: CodexStatusResponse;
-  initialTab?: 'general' | 'ai-services' | 'local-components';
+  initialTab?: 'general' | SettingsRouteTab;
   initialSection?: CreatorServicesSection;
   componentId?: string;
   returnToTranslation?: boolean;
@@ -93,6 +107,7 @@ export type OpenCreatorSettingsViewProps = {
 type SettingsTab =
   | 'general'
   | 'ai-services'
+  | 'platform-connections'
   | 'local-components'
   | 'plugins'
   | 'memory'
@@ -103,11 +118,14 @@ type SettingsTab =
 
 export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => props.initialTab ?? 'general');
+  const [gatewayState, setGatewayState] = useState<GatewayAccountState>();
   const { t } = useAppLanguage();
   const l = useLocalizedCopy();
+  const officialMode = gatewayState !== undefined && (gatewayState.source === 'gateway' || gatewayState.authState !== 'signed_out');
   const tabs: Array<{ id: SettingsTab; label: string }> = [
     { id: 'general', label: t('settings.tab.general') },
     { id: 'ai-services', label: t('settings.tab.aiServices') },
+    { id: 'platform-connections', label: l('平台连接', 'Platform connections') },
     { id: 'local-components', label: t('settings.tab.runtimeComponents') },
     { id: 'plugins', label: t('settings.tab.plugins') },
     { id: 'memory', label: t('settings.tab.memory') },
@@ -120,6 +138,21 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
   useEffect(() => {
     if (props.initialTab !== undefined) setActiveTab(props.initialTab);
   }, [props.initialTab]);
+
+  useEffect(() => {
+    if (props.gatewayAccountState) { setGatewayState(props.gatewayAccountState); return; }
+    let canceled = false;
+    void props.gatewayAccountService?.getState().then(next => { if (!canceled) setGatewayState(next); }).catch(() => undefined);
+    return () => { canceled = true; };
+  }, [props.gatewayAccountService, props.gatewayAccountState]);
+
+  const modeControls = props.gatewayAccountService && gatewayState ? (
+    <div className={`gateway-account ai-services-mode${officialMode ? ' ai-services-mode--official' : ''}`}>
+      <span className="ai-services-mode__label">{l('使用模式', 'Usage mode')}</span>
+      <strong>{officialMode ? l('官方服务', 'Official service') : l('自定义配置', 'Custom configuration')}</strong>
+      {!officialMode && props.onOpenPersonalCenter ? <button type="button" onClick={props.onOpenPersonalCenter}><UserRound size={15} aria-hidden="true"/>{l('登录 OpenCreator', 'Sign in to OpenCreator')}</button> : null}
+    </div>
+  ) : null;
 
   return (
     <div className="settings-page">
@@ -137,7 +170,7 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
             >
               <span className="settings-nav-label">
                 {tab.label}
-                {tab.id === 'ai-services' ? (
+                {tab.id === 'ai-services' && !officialMode ? (
                   <small className="settings-nav-required">{t('settings.required')}</small>
                 ) : null}
                 {tab.id === 'local-components'
@@ -155,6 +188,8 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
       <main className="opencreator-scroll-page settings-content">
         {activeTab === 'general' ? (
           <GeneralSettings
+            creatorServicesService={props.creatorServicesService}
+            connected={props.runtimeStatus.connected}
             defaultPermission={props.defaultPermission ?? 'follow-project'}
             defaultPermissionError={props.defaultPermissionError}
             onDefaultPermissionChange={props.onDefaultPermissionChange}
@@ -174,24 +209,41 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
         ) : null}
         {activeTab === 'ai-services' ? (
           <>
-            {props.agentSetupNeeded && props.onOpenAgentSetup !== undefined ? (
-              <div className="settings-inline-warning" role="status">
-                {l('Agent 尚未配置，无法发送任务。', 'Agent is not configured; tasks cannot be sent.')}
-                {' '}
-                <button className="settings-secondary-button" type="button" onClick={props.onOpenAgentSetup}>
-                  {l('配置 Agent', 'Set up Agent')}
-                </button>
-              </div>
-            ) : null}
+            {officialMode && gatewayState ? <section className="settings-section gateway-account official-services-settings" aria-labelledby="official-services-title">
+              <header className="official-services-heading">
+                <div>
+                  <h1 id="official-services-title">{l('AI 服务', 'AI services')}</h1>
+                  <p className={`official-services-status${gatewayState.activationState === 'ready' ? ' is-ready' : ''}`} role="status">
+                    {gatewayState.activationState === 'ready' ? <CircleCheck size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}
+                    {gatewayState.authState === 'authorizing' ? l('正在登录', 'Signing in') : gatewayState.activationState === 'loading' ? l('正在连接', 'Connecting') : gatewayState.activationState === 'ready' ? l('已连接', 'Connected') : gatewayState.authState === 'expired' ? l('登录已过期', 'Session expired') : l('暂不可用', 'Unavailable')}
+                  </p>
+                </div>
+                {props.onOpenPersonalCenter ? <button type="button" onClick={props.onOpenPersonalCenter}><UserRound size={15} aria-hidden="true"/>{l('账户', 'Account')}</button> : null}
+              </header>
+              {modeControls}
+              {props.gatewayAccountService ? <OfficialServicesSettingsView state={gatewayState} service={props.gatewayAccountService} onChange={next => { setGatewayState(next); props.onGatewayStateChange?.(next); }} /> : null}
+            </section> : null}
             <Suspense fallback={
               <p role="status">{l('正在加载 AI 服务设置…', 'Loading AI service settings…')}</p>
             }>
-              <CreatorServicesSettingsView
+              {props.gatewayAccountService && gatewayState === undefined ? <p role="status">{l('正在检查使用模式…', 'Checking usage mode…')}</p> : !officialMode ? <CreatorServicesSettingsView
                 connected={props.runtimeStatus.connected}
                 service={props.creatorServicesService ?? null}
                 modelService={props.codexRuntimeService ?? null}
                 initialSection={props.initialSection}
-              />
+                modeControls={<>
+                  {modeControls}
+                  {props.agentSetupNeeded && props.onOpenAgentSetup !== undefined ? (
+                    <div className="settings-inline-warning" role="status">
+                      {l('Agent 尚未配置，无法发送任务。', 'Agent is not configured; tasks cannot be sent.')}
+                      {' '}
+                      <button className="settings-secondary-button" type="button" onClick={props.onOpenAgentSetup}>
+                        {l('配置 Agent', 'Set up Agent')}
+                      </button>
+                    </div>
+                  ) : null}
+                </>}
+              /> : null}
             </Suspense>
           </>
         ) : null}
@@ -203,6 +255,7 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
             controller={props.runtimeDependencies}
           />
         ) : null}
+        {activeTab === 'platform-connections' ? <PlatformConnectionsSettingsView connected={props.runtimeStatus.connected} service={props.platformConnectionsService} /> : null}
         {activeTab === 'plugins' ? <PluginSettings runtimeStatus={props.runtimeStatus} /> : null}
         {activeTab === 'memory' ? (
           <MemorySettingsView
@@ -240,6 +293,8 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
 }
 
 function GeneralSettings(props: {
+  creatorServicesService?: CreatorServicesSettingsService | null;
+  connected: boolean;
   defaultPermission: DefaultPermissionPreference;
   defaultPermissionError?: string;
   onDefaultPermissionChange?(permission: DefaultPermissionPreference): void;
@@ -389,6 +444,7 @@ function GeneralSettings(props: {
         <p>{t('settings.general.description')}</p>
       </header>
       <div className="settings-card">
+        <NetworkSettings service={props.creatorServicesService} connected={props.connected} />
         {import.meta.env.VITE_FG_MANAGED === '1' ? <>
           <SettingsRow label="项目与产物" value="公司 NAS · 按 FG 账号隔离保存" />
           <SettingsRow label="存储说明" value="服务器容器中的 /workspace 映射到 NAS，文件不保存在你的电脑。" />

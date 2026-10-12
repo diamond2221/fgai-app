@@ -28,7 +28,7 @@ export default function FGAudioToolsPage(){
  async function run(){
   if(!canSubmit)return;setBusy(true);setError("");
   try{
-   if(tab==="music"){await createMusicJob({operationId:crypto.randomUUID(),title:musicTitle,model:musicModel,mode:musicMode,voice:musicVoice,styles:musicStyles,lyrics:musicLyrics,description:text});setMusicEpoch(value=>value+1);setMusicNotice("创作已进入公司制作队列，管理员处理后作品会保存到你的 NAS 资产。");}
+   if(tab==="music"){const job=await createMusicJob({operationId:crypto.randomUUID(),title:musicTitle,model:musicModel,mode:musicMode,voice:musicVoice,styles:musicStyles,lyrics:musicLyrics,description:text});setMusicEpoch(value=>value+1);setMusicNotice(`音乐任务已登记（${job.id}），等待管理员在公司 Suno 账号制作；归档后下方会显示试听结果。`);setTimeout(()=>document.getElementById(`music-job-${job.id}`)?.scrollIntoView({behavior:'smooth',block:'center'}),300);}
    else if(tab==="translation"){await createSpeechJob({...context,kind:"translation",operationId:crypto.randomUUID(),texts:[text],source:"zh",target});await refresh();}
    else{const blob=await generateCompanySpeech({...context,model:tab==="music"?"suno-company-music":tab==="sound"?"seed-audio-1.0":"seed-tts-2.0",input:content,voice:tab==="music"?musicVoice:tab==="sound"?"prompt":voice,response_format:"mp3",speed:1,...(tab==="music"?{suno:{mode:musicMode,model:musicModel,title:musicTitle,styles:musicMode==="custom"?musicStyles:"",lyrics:musicMode==="custom"&&musicVoice==="song"?musicLyrics:""}}:{})},crypto.randomUUID());setAudio(URL.createObjectURL(blob));}
   }catch(e){setError(e instanceof Error?e.message:"音频请求失败，请查看原任务记录");}finally{setBusy(false);}

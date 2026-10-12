@@ -18,5 +18,6 @@ describe("Gemini Images request helpers", () => {
             imageConfig: { aspectRatio: "16:9", imageSize: "4K" },
         });
         expect(buildGeminiImageGenerationConfig("auto", "auto")).toEqual({ responseModalities: ["TEXT", "IMAGE"] });
+        expect(buildGeminiImageGenerationConfig("1:8", "512px")).toEqual({ responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: "1:8", imageSize: "512px" } });
     });
 });

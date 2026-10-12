@@ -178,7 +178,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (isVolcengineArkImageProtocol(requestConfig.interfaceType)) {
         if (mask) throw new Error("火山方舟图片协议不支持蒙版编辑，请移除蒙版后重试");
         const quality = imageProfile.quality.supported && normalizedImage.quality !== "auto" ? normalizeQuality(normalizedImage.quality) || normalizedImage.quality : undefined;
-        const sizeRequest = resolveImageRequestSize(imageProfile, quality, normalizedImage.size);
+        const sizeRequest = resolveImageRequestSize(imageProfile, quality, normalizedImage.size, references.length);
         const requestSize = sizeRequest?.parameter === "size" ? { ...sizeRequest, value: normalizeVolcengineArkImageSize(sizeRequest.value, requestConfig.model)! } : sizeRequest;
         try {
             const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
@@ -201,7 +201,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         }
     }
     const quality = imageProfile.quality.supported && normalizedImage.quality !== "auto" ? normalizeQuality(normalizedImage.quality) || normalizedImage.quality : undefined;
-    const requestSize = resolveImageRequestSize(imageProfile, quality, normalizedImage.size);
+    const requestSize = resolveImageRequestSize(imageProfile, quality, normalizedImage.size, references.length);
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));

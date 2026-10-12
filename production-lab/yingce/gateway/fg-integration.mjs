@@ -41,7 +41,7 @@ export async function fgAPI(req,res,{actor,cookie,path,pool,web,platform,platfor
       send(res,{models:modelPriceRows(prices,specs,evidence,fx)});return true;
     }
     const seed=JSON.parse(await fs.readFile(process.env.FG_TOPICS_FILE||new URL('./topics.json',import.meta.url),'utf8'));
-    if(await teamAndStoryAPI(req,res,{actor,cookie,path,pool,web,platform,platformCookie,publicOrigin},{body:jsonBody,send,topics:seed}))return true;
+    if(await teamAndStoryAPI(req,res,{actor,cookie,path,pool,web,platform,platformCookie,publicOrigin},{body:jsonBody,send,topics:seed,api}))return true;
     const topics=await approvedTopics(pool,seed);
     if(await storyCatalogRoute(req,res,{actor,path,pool,topics,body:jsonBody,send,api}))return true;
     if(path.pathname==='/api/fg/topics'&&req.method==='GET'){send(res,{topics});return true;}

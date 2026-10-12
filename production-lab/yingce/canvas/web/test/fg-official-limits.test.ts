@@ -3,6 +3,23 @@ import {defaultModelCapabilityConfig} from '../src/lib/model-capabilities';
 import {assertVideoCapability} from '../src/services/api/video-validation';
 import {resolveImageRequestSize} from '../src/services/api/image-validation';
 
+test('Wan reference and output durations share a 30 second budget',()=>{
+ const v=defaultModelCapabilityConfig().video!;
+ const profile={...v,duration:{selection:'enum' as const,values:Array.from({length:29},(_,i)=>i+2),default:5},references:{...v.references,maxInputOutputDurationSeconds:30,maxVideos:5,maxVideoDurationSeconds:15,maxImageSide:8000,maxVideoSide:4096}};
+ const ref={id:'a',name:'test',type:'video/mp4',url:'https://example.com/a',durationMs:10000,width:1920,height:1080};
+ expect(()=>assertVideoCapability(profile,[],[ref],[],'20')).not.toThrow();
+ expect(()=>assertVideoCapability(profile,[],[ref],[],'21')).toThrow('合计');
+ expect(()=>assertVideoCapability(profile,[],[{...ref,width:5000}],[],'20')).toThrow('宽高');
+});
+
+test('Wan reference edits cannot submit text-only 4K output',()=>{
+ const profile=defaultModelCapabilityConfig().image!;
+ profile.size={...profile.size,allowCustom:true,constraints:{minPixels:589824,maxPixels:16777216,maxRatio:8,maxReferencePixels:4194304}};
+ expect(resolveImageRequestSize(profile,undefined,'4096x4096',0)?.value).toBe('4096x4096');
+ expect(()=>resolveImageRequestSize(profile,undefined,'4096x4096',1)).toThrow('2K');
+ expect(resolveImageRequestSize(profile,undefined,'2048x2048',1)?.value).toBe('2048x2048');
+});
+
 test('30s profile enforces accumulated source duration, not a global 15s cap',()=>{
  const v=defaultModelCapabilityConfig().video!;
  const profile={...v,duration:{selection:'enum' as const,values:Array.from({length:27},(_,i)=>i+4),default:5},references:{...v.references,maxVideos:10,maxVideoDurationSeconds:30,minVideoDurationSeconds:2,maxTotalVideoDurationSeconds:30}};

@@ -112,7 +112,7 @@ function dimensionGCD(left: number, right: number) {
     return Math.max(1, left);
 }
 
-export function resolveImageRequestSize(profile: ImageCapabilityConfig, quality: string | undefined, size: string) {
+export function resolveImageRequestSize(profile: ImageCapabilityConfig, quality: string | undefined, size: string, referenceCount = 0) {
     const request = imageSizeRequest(profile, size);
     if (!request) return undefined;
     if (request.parameter === "aspect_ratio" && !profile.size.allowCustom && profile.size.presets?.length) {
@@ -124,7 +124,10 @@ export function resolveImageRequestSize(profile: ImageCapabilityConfig, quality:
     }
     const dimensions = parseImageDimensions(request.value);
     if (request.parameter === 'size' && dimensions && profile.size.constraints) {
-        const {minPixels,maxPixels,maxRatio}=profile.size.constraints,pixels=dimensions.width*dimensions.height,ratio=dimensions.width/dimensions.height;
+        const {minPixels,maxPixels,maxRatio,maxSide,edgeMultiple}=profile.size.constraints,pixels=dimensions.width*dimensions.height,ratio=dimensions.width/dimensions.height;
+        if (referenceCount > 0 && profile.size.constraints.maxReferencePixels && pixels > profile.size.constraints.maxReferencePixels) throw new Error('当前模型参考图编辑最多支持 2K，请调整输出尺寸');
+        if (maxSide && (dimensions.width>maxSide||dimensions.height>maxSide)) throw new Error('图片最长边超出当前模型官方范围');
+        if (edgeMultiple && (dimensions.width%edgeMultiple!==0||dimensions.height%edgeMultiple!==0)) throw new Error(`图片宽高必须是 ${edgeMultiple} 像素的整数倍`);
         if (!Number.isInteger(dimensions.width) || !Number.isInteger(dimensions.height) || dimensions.width<=0 || dimensions.height<=0 || pixels<minPixels || pixels>maxPixels || ratio>maxRatio || ratio<1/maxRatio) throw new Error('自定义图片像素总量或宽高比超出当前模型官方范围');
         return request;
     }

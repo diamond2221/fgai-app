@@ -15,7 +15,7 @@ describe("audio voice protocol handling", () => {
     test("canvas channel-qualified selections retain company audio settings", () => {
         const channels = [{id:"company-audio",models:["seed-audio-1.0","seed-tts-2.0"],modelCosts:[],interfaceType:"openai-audio",baseUrl:"",apiKey:""}];
         const seed = {...config("openai-audio"),channels,model:"company-audio::seed-audio-1.0",audioVoice:"alloy",audioSpeed:"1",audioFormat:"wav"};
-        expect(audioSettingsSummary(seed)).toBe("WAV");
+        expect(audioSettingsSummary(seed)).toBe("提示词生成声音 · WAV");
         expect(normalizeAudioVoiceForConfig(seed,"alloy")).toBe("prompt");
         const tts = {...seed,model:"company-audio::seed-tts-2.0"};
         expect(audioSettingsSummary(tts)).toBe("高冷御姐 · 2.0 · WAV · 1x");
@@ -32,7 +32,7 @@ describe("audio voice protocol handling", () => {
     });
     test("Seed Audio does not show an unrelated preset voice or speed in the canvas footer", () => {
         const seed = {...config("openai-audio"),model:"seed-audio-1.0",audioModel:"seed-audio-1.0",audioVoice:"alloy",audioSpeed:"1",audioFormat:"wav"};
-        expect(audioSettingsSummary(seed)).toBe("WAV");
+        expect(audioSettingsSummary(seed)).toBe("提示词生成声音 · WAV");
         const tts = {...seed,model:"seed-tts-2.0",audioModel:"seed-tts-2.0"};
         expect(audioSettingsSummary(tts)).toBe("高冷御姐 · 2.0 · WAV · 1x");
     });

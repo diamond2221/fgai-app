@@ -22,6 +22,21 @@ export async function musicQueueRoute(req,res,{pool,actor,path,ownerAPI,download
    const rows=(await pool.query(`SELECT j.*,u.display_name owner_name FROM fg_music_jobs j JOIN users u ON u.id=j.owner_id WHERE ($2::boolean OR j.owner_id=$1) ORDER BY CASE WHEN status='succeeded' THEN 1 ELSE 0 END,created_at DESC LIMIT 60`,[actor.id,actor.reviewer===true])).rows;
    send({canManage:actor.reviewer===true,jobs:rows.map(publicMusicJob)});return true;
   }
+  const jobMatch=/^\/api\/fg\/music\/jobs\/([0-9a-f-]{36})$/.exec(path.pathname);
+  if(req.method==='GET'&&jobMatch){
+   const job=(await pool.query('SELECT * FROM fg_music_jobs WHERE id=$1',[jobMatch[1]])).rows[0];
+   if(!job||(!actor.reviewer&&job.owner_id!==actor.id)){send({message:'音乐任务不存在'},404);return true;}
+   send(publicMusicJob(job));return true;
+  }
+  const accessMatch=/^\/api\/fg\/music\/jobs\/([0-9a-f-]{36})\/access$/.exec(path.pathname);
+  if(req.method==='GET'&&accessMatch){
+   const job=(await pool.query('SELECT * FROM fg_music_jobs WHERE id=$1',[accessMatch[1]])).rows[0];
+   if(!job||(!actor.reviewer&&job.owner_id!==actor.id)){send({message:'音乐作品不存在'},404);return true;}
+   if(job.status!=='succeeded'||!job.resource_id)throw Error('音乐作品仍在制作，暂不能试听');
+   const data=await ownerAPI(job.owner_id,'/resources/access','POST',JSON.stringify([{resourceId:job.resource_id,purpose:'display',variant:'original'}]),{'content-type':'application/json'});
+   const item=data.items?.[0];if(!item?.access?.url)throw Error(item?.error?.msg||'作品访问暂不可用');
+   send(item.access);return true;
+  }
   if(req.method==='POST'&&path.pathname==='/api/fg/music/jobs'){
    const input=await body(req);if(!uuid.test(input.operationId||''))throw Error('缺少音乐操作标识');
    const brief=musicBrief(input),hash=createHash('sha256').update(JSON.stringify(brief)).digest('hex');
