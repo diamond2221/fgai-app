@@ -129,38 +129,40 @@ func prepareFGWeTokenAssets(ctx context.Context, config providerConfig, request 
 	return nil
 }
 
-// Keep the official JSON edits contract, including authorized inline references.
-// Converting this body to multipart leaves JSON images encoded as form strings.
+// WeToken's image edit relay accepts the official file-upload contract but its
+// JSON path drops images. Send actual file parts, never JSON-valued form fields.
 func prepareFGWeTokenImageEdit(config providerConfig, request protocol.GenerationRequest, spec *protocol.RequestSpec) error {
 	if !isFGWeToken(config.BaseURL) || config.InterfaceType != "openai-image" || len(request.Images) == 0 {
 		return nil
 	}
 	spec.Path = "/v1/images/edits"
 	spec.OriginPath = true
-	spec.ContentType = "application/json"
+	spec.ContentType = "multipart/form-data"
 	body, ok := spec.Body.(map[string]any)
 	if !ok {
 		return errors.New("FG 图片编辑请求格式无效")
 	}
 	delete(body, "image")
+	delete(body, "images")
+	delete(body, "response_format") // GPT image models return base64 without this legacy parameter.
 	spec.Files = nil
-	images := make([]any, 0, len(request.Images))
+	imageCount := 0
 	delete(body, "mask")
-	for _, ref := range request.Images {
+	for index, ref := range request.Images {
 		location := firstNonEmpty(ref.DataURL, ref.URL)
 		if location == "" {
 			return errors.New("图片编辑参考素材缺少可读取的图片")
 		}
-		image := map[string]any{"image_url": location}
+		name := "image[]"
 		if ref.Role == "mask" {
-			body["mask"] = image
+			name = "mask"
 		} else {
-			images = append(images, image)
+			imageCount++
 		}
+		spec.Files = append(spec.Files, protocol.RequestFilePart{Name: name, Filename: firstNonEmpty(ref.Name, fmt.Sprintf("reference-%d.png", index+1)), MIMEType: ref.MIMEType, Reference: ref})
 	}
-	if len(images) == 0 {
+	if imageCount == 0 {
 		return errors.New("图片编辑至少需要一张参考图")
 	}
-	body["images"] = images
 	return nil
 }

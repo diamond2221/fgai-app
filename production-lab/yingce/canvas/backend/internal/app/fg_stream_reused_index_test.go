@@ -34,3 +34,31 @@ func TestFGStreamSeparatesSequentialToolIDsSharingWireIndex(t *testing.T) {
 		}
 	}
 }
+
+func TestFGStreamEmptyArgumentToolBeforeReusedIndexBatch(t *testing.T) {
+	p := newStreamingAgentParser("chat-completion", nil)
+	frames := []map[string]any{
+		{"index": 0, "id": "read", "function": map[string]any{"name": "canvas_get_state", "arguments": ""}},
+		{"index": 0, "id": "first", "function": map[string]any{"name": "task_get", "arguments": ""}},
+		{"index": 0, "function": map[string]any{"arguments": `{"taskId":"one"}`}},
+		{"index": 1, "id": "second", "function": map[string]any{"name": "task_get", "arguments": ""}},
+		{"index": 1, "function": map[string]any{"arguments": `{"taskId":"two"}`}},
+	}
+	for _, frame := range frames {
+		p.consumeChatCompletionEvent(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{frame}}}}})
+	}
+	result, err := p.result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := interfaceSlice(result["toolCalls"])
+	if len(calls) != 3 {
+		t.Fatal(calls)
+	}
+	for i, want := range []string{`{}`, `{"taskId":"one"}`, `{"taskId":"two"}`} {
+		call := calls[i].(map[string]any)
+		if call["function"].(map[string]any)["arguments"] != want {
+			t.Fatal(call)
+		}
+	}
+}

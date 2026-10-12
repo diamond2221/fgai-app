@@ -184,7 +184,7 @@ func (p *streamingAgentParser) consumeChatCompletionEvent(payload map[string]int
 				// Some relays restart the index for each sequential Claude tool.
 				// A new ID starts a separate call; its following index-only deltas
 				// must follow this mapping rather than append to the previous JSON.
-				if !json.Valid([]byte(current.arguments)) {
+				if strings.TrimSpace(current.arguments) != "" && !json.Valid([]byte(current.arguments)) {
 					p.err = errors.New("Agent 上游复用了未完成工具的索引")
 					return
 				}

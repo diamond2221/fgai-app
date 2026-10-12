@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"io"
+	"mime"
+	"mime/multipart"
 	"testing"
 	"yingce/backend/internal/protocol"
 )
@@ -40,20 +43,44 @@ func TestFGAssetStatusContract(t *testing.T) {
 	}
 }
 func TestFGImageReferencesUseEdits(t *testing.T) {
-	spec := protocol.RequestSpec{Path: "/v1/images/generations", Body: map[string]any{"prompt": "retain identity"}}
-	req := protocol.GenerationRequest{Images: []protocol.MediaReference{{URL: "https://media.example/image.png"}, {Role: "mask", DataURL: "data:image/png;base64,AQ=="}}}
+	spec := protocol.RequestSpec{Path: "/v1/images/generations", Body: map[string]any{"prompt": "retain identity", "images": []any{}, "response_format": "b64_json", "size": "2496x1664", "quality": "low"}}
+	req := protocol.GenerationRequest{Images: []protocol.MediaReference{{DataURL: "data:image/png;base64,AQ=="}, {DataURL: "data:image/png;base64,Ag=="}, {Role: "mask", DataURL: "data:image/png;base64,Aw=="}}}
 	err := prepareFGWeTokenImageEdit(providerConfig{BaseURL: "https://wetoken.ai/v1", InterfaceType: "openai-image"}, req, &spec)
-	if err != nil || spec.Path != "/v1/images/edits" || !spec.OriginPath || spec.ContentType != "application/json" || len(spec.Files) != 0 {
+	if err != nil || spec.Path != "/v1/images/edits" || !spec.OriginPath || spec.ContentType != "multipart/form-data" || len(spec.Files) != 3 {
 		t.Fatal(spec, err)
 	}
 	body := spec.Body.(map[string]any)
-	images := creationMaps(body["images"])
-	if len(images) != 1 || images[0]["image_url"] != "https://media.example/image.png" {
-		t.Fatal("JSON image references required", body)
+	for _, key := range []string{"images", "image", "mask", "response_format"} {
+		if _, exists := body[key]; exists {
+			t.Fatalf("unexpected form field %s", key)
+		}
 	}
-	mask, _ := body["mask"].(map[string]any)
-	if mask["image_url"] != "data:image/png;base64,AQ==" {
-		t.Fatal("mask reference missing", body)
+	reader, contentType, err := protocolRequestBody(context.Background(), providerConfig{}, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, parameters, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form, err := multipart.NewReader(reader, parameters["boundary"]).ReadForm(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer form.RemoveAll()
+	if form.Value["size"][0] != "2496x1664" || form.Value["quality"][0] != "low" || len(form.File["image[]"]) != 2 || len(form.File["mask"]) != 1 {
+		t.Fatal("incomplete multipart edit")
+	}
+	for index, file := range append(form.File["image[]"], form.File["mask"]...) {
+		part, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(part)
+		part.Close()
+		if err != nil || len(data) != 1 || data[0] != byte(index+1) {
+			t.Fatal("reference file bytes missing", err)
+		}
 	}
 	unchanged := protocol.RequestSpec{Path: "/v1/images/generations"}
 	_ = prepareFGWeTokenImageEdit(providerConfig{BaseURL: "https://other.example", InterfaceType: "openai-image"}, req, &unchanged)
