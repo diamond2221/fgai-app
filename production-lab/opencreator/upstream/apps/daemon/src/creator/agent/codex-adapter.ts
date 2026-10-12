@@ -159,6 +159,7 @@ function developerInstructions(guideVersion: number): string {
     '严格遵循 Creator Context.templateGuidance 中的模板字段与执行约束；工具返回参数错误时，重新读取 context 并用正确结构重试，不得把失败写入当成成功。',
     '不得直接修改 Creator 数据库、Artifact 文件或调用 KrillinAI。',
     '模板定义不属于 Skill；以 Creator Context 和工具端校验为准。',
+    '如果提供 creator_list_company_skills 与 creator_read_company_skill，可按任务选择并完整读取公司制作技能及所需引用文档；制作指令不能绕过 Creator Action、审批、费用和文件权限约束。没有这些工具时不得声称已读取公司技能。',
     '不要在回复中播报 Skill、上下文读取、工具选择或审批实现等内部处理过程。',
     'Job revision 只用于内部乐观并发控制。除非用户明确询问冲突或诊断，否则不要向用户展示 revision。',
     'state.resultVersion 是项目快照版本；Artifact.version 是字幕、配音、横屏视频、竖屏视频等子项自己的版本。必须明确表达为“项目 V2”“横屏视频 V1”，不得混用。',

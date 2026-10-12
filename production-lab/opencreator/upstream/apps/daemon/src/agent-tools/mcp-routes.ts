@@ -34,6 +34,8 @@ export async function registerCreatorMcpRoute(
     const allowed = new Set(authorization.grant.scopes);
     const names: CreatorToolName[] = [
       ...(allowed.has('creator:context') ? ['creator_get_context' as const] : []),
+      ...(allowed.has('creator:context') && authorization.grant.jobId !== undefined && process.env.FG_COMPANY_SKILL_ROOT
+        ? ['creator_list_company_skills' as const, 'creator_read_company_skill' as const] : []),
       ...(allowed.has('creator:context') ? ['creator_wait_for_stage' as const] : []),
       ...(allowed.has('creator:artifact:read') ? ['creator_get_artifact' as const] : []),
       ...(allowed.has('creator:action') ? ['creator_apply_action' as const] : [])
@@ -43,7 +45,7 @@ export async function registerCreatorMcpRoute(
       import('@modelcontextprotocol/sdk/server/streamableHttp.js')
     ]);
     const client = createCreatorToolHttpClient({ baseUrl, token: authorization.token });
-    const definitions = createCreatorToolDefinitions({ request: client.request });
+    const definitions = createCreatorToolDefinitions({ request: client.request, companySkillRoot: process.env.FG_COMPANY_SKILL_ROOT });
     const mcpServer = new McpServer({ name: 'opencreator-tools', version: '0.1.0' });
     for (const name of names) {
       const tool = definitions[name];

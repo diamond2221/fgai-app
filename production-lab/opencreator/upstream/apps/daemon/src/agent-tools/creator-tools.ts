@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { companySkillReader } from './fg-company-skills.js';
 import type {
   AgentContextEnvelope,
   CreatorCommandRequest,
@@ -17,6 +18,8 @@ import type {
 export const CREATOR_TOOL_NAMES = [
   'creator_get_context',
   'creator_get_artifact',
+  'creator_list_company_skills',
+  'creator_read_company_skill',
   'creator_wait_for_stage',
   'creator_apply_action'
 ] as const;
@@ -129,8 +132,29 @@ const actionSchema = z.object({
 
 export function createCreatorToolDefinitions(input: {
   request(request: { method: 'GET' | 'POST'; path: string; body?: Record<string, unknown> }): Promise<unknown>;
+  companySkillRoot?: string;
 }) {
+  const skills = companySkillReader(input.companySkillRoot);
+  const skillSchema = z.object({
+    name: z.string().regex(/^fg-[a-z0-9][a-z0-9-]{0,99}$/),
+    resource: z.string().default('SKILL.md'),
+    offset: z.number().int().nonnegative().default(0),
+    maxChars: z.number().int().min(1).max(12000).default(8000)
+  }).strict();
   return {
+    creator_list_company_skills: {
+      description: '列出已安装的公司制作 Skill。先选择适合当前任务的技能，再读取正文；不访问个人文件。',
+      inputSchema: z.object({}).strict(),
+      execute: async () => skills.list()
+    },
+    creator_read_company_skill: {
+      description: '读取已安装公司 Skill 的 SKILL.md 或其引用的相对 Markdown 文档。hasMore 为 true 时继续按 nextOffset 读取；遵循当前用户要求及 Creator 工具的写入和审批限制。',
+      inputSchema: skillSchema,
+      execute: async (value: unknown) => {
+        const args = skillSchema.parse(value);
+        return skills.read(args.name, args.resource, args.offset, args.maxChars);
+      }
+    },
     creator_get_context: {
       description: '读取当前 OpenCreator 创作任务的最小上下文和最新 revision。修改前必须先调用。',
       inputSchema: z.object({}).strict(),

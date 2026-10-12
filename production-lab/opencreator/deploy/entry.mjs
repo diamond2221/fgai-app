@@ -8,6 +8,7 @@ import {managedTextDefault} from './company-config.mjs';
 
 const capability=process.env.FG_CREATOR_CAPABILITY;
 const actor=process.env.FG_CREATOR_ACTOR;
+process.env.FG_COMPANY_SKILL_ROOT='/opt/fg-skills';
 if(!capability||!/^[0-9a-f-]{36}$/.test(actor||''))throw Error('FG creator identity missing');
 globalThis.fetch=companyMediaFetch(globalThis.fetch,`http://fg-gateway:3010/internal/creator/${actor}`,capability);
 await fs.access('/workspace/.fg-creator-ready');
