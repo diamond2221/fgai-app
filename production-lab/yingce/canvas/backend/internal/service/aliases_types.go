@@ -121,6 +121,7 @@ type (
 	CreateAssetCandidatesRequest           = app.CreateAssetCandidatesRequest
 	CreateAssetFolderRequest               = app.CreateAssetFolderRequest
 	CreateAssetVersionRequest              = app.CreateAssetVersionRequest
+	UpdateProjectAssetVisualRequest        = app.UpdateProjectAssetVisualRequest
 	CreatePaymentOrderRequest              = app.CreatePaymentOrderRequest
 	CreateCharacterRequest                 = app.CreateCharacterRequest
 	CreateProjectAssetFolderRequest        = app.CreateProjectAssetFolderRequest

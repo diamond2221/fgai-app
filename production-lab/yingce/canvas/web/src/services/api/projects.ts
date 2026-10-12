@@ -68,6 +68,7 @@ export type ProjectAsset = {
     previewText?: string;
     updatedAt: string;
     character?: CharacterCardSummary;
+    definition?: Record<string, unknown>;
     source?: string;
 };
 
@@ -578,6 +579,10 @@ export function updateProjectCharacter(projectId: string, assetId: string, input
 
 export function replaceProjectCharacterRepresentations(projectId: string, assetId: string, representations: Array<{ role: string; resourceId: string; metadata?: Record<string, unknown> }>) {
     return http.put<ProjectCharacterDetail>(`/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(assetId)}/representations`, { representations });
+}
+
+export function updateProjectAssetVisual(projectId: string, assetId: string, input: { resourceId?: string; versionId?: string; definition?: Record<string, unknown> }) {
+    return http.put<{ asset: ProjectAsset }>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/visual`, input);
 }
 
 export function bindProjectCharacterVoice(projectId: string, assetId: string, input: { voiceProfileId?: string; sampleResourceId?: string; voiceName?: string; instructions?: string }) {

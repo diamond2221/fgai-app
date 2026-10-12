@@ -10,6 +10,7 @@ WORKDIR /app
 COPY backend/agent-runtime/pi/package.json backend/agent-runtime/pi/package-lock.json /app/agent-runtime/
 RUN npm ci --omit=dev --ignore-scripts --prefix /app/agent-runtime
 COPY backend/agent-runtime/pi/agent-runtime.mjs /app/agent-runtime/agent-runtime.mjs
+COPY backend/agent-runtime/pi/model-context.mjs /app/agent-runtime/model-context.mjs
 COPY yingce-agent/server.mjs /app/server.mjs
 
 ENV NODE_ENV=production

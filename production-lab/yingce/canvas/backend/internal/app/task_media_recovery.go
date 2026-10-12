@@ -413,6 +413,9 @@ func (s *Service) finishTaskMediaRecovery(task *model.Task, result map[string]in
 		return s.handleMediaRecoveryFailure(task, err)
 	}
 	started := time.Now()
+	if err = s.finalizeProjectVisualTask(*task, result); err != nil {
+		return s.handleMediaRecoveryFailure(task, &mediaRecoveryError{stage: "register", cause: err})
+	}
 	if _, err = s.finalizeCharacterTurnaroundTask(*task, result); err == nil {
 		var encoded []byte
 		encoded, err = json.Marshal(result)

@@ -140,13 +140,15 @@ func (r *Repository) ProjectUnitAssetCandidates(projectID string, unitID string)
 }
 
 func (r *Repository) ProjectUnitAssets(userID string, projectID string, unitID string) ([]model.Asset, error) {
+	if _, err := r.ProjectForUser(userID, projectID); err != nil {
+		return nil, err
+	}
 	var assets []model.Asset
 	err := r.db.Table("assets").Distinct("assets.*").
 		Joins("JOIN project_asset_links pal ON pal.asset_id = assets.id AND pal.project_id = ?", projectID).
 		Joins("JOIN asset_versions av ON av.asset_id = assets.id").
 		Joins("JOIN shot_asset_references sar ON sar.asset_version_id = av.id").
 		Joins("JOIN shots s ON s.id = sar.shot_id AND s.project_id = ? AND s.unit_id = ?", projectID, unitID).
-		Where("assets.user_id = ?", userID).
 		Order("assets.updated_at desc").
 		Scan(&assets).Error
 	return assets, err

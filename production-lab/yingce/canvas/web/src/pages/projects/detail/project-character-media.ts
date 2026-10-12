@@ -4,8 +4,23 @@ import { resolveStyleExecutionPlan, serializeStyleProfile, type StyleProfileSnap
 import { logicalModelIDForConfig, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import { defaultImageParamsForModel } from "@/lib/model-selection";
 import { modelCapabilityConfigFor, normalizeImageValue } from "@/lib/model-capabilities";
+import { projectVisualPrompt } from "./project-visual-prompt";
+import { resourceIdFromStorageKey } from "@/services/api/resources";
+import { updateProjectAssetVisual, type ProjectAsset } from "@/services/api/projects";
 
 type ProjectStylePrompt = { id: string; title: string; prompt: string; profile?: StyleProfileSnapshot };
+
+export async function generateProjectVisual(input: { projectId: string; asset: ProjectAsset; projectStyle?: ProjectStylePrompt; config: AiConfig }) {
+    const result = await runBackendCanvasGenerationTask({
+        projectId: input.projectId, nodeId: `project-visual:${input.asset.id}`, mode: "image",
+        prompt: projectVisualPrompt({ name: input.asset.title, category: input.asset.category, definition: input.asset.definition || {}, style: input.projectStyle?.prompt }),
+        config: { ...input.config, count: "1", taskWorkflowProvider: "model" },
+        metadata: { operation: "project_asset_image", assetId: input.asset.id, assetVersionId: input.asset.primaryVersionId },
+    });
+    const resourceId = resourceIdFromStorageKey(result.images?.[0]?.storageKey);
+    if (!resourceId) throw new Error("图片已生成，但尚未保存到资源库，请从任务记录恢复图片后绑定");
+    return updateProjectAssetVisual(input.projectId, input.asset.id, { resourceId, versionId: input.asset.primaryVersionId });
+}
 
 export function characterTurnaroundConfig(config: AiConfig): AiConfig {
     const model = config.imageModel || config.model;

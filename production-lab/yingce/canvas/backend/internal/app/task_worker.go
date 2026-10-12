@@ -259,10 +259,16 @@ func (w *taskWorkerCoordinator) processClaimedTask(task *model.Task, globalSlot 
 	}
 	providerSucceeded := routeResult.providerSucceeded
 	if err == nil {
+		err = s.validateStoryboardTaskResult(*task, result)
+	}
+	if err == nil {
 		result, err = s.persistGeneratedMediaResult(task.UserID, result)
 	}
 	if err == nil {
 		_, err = s.finalizeCharacterTurnaroundTask(*task, result)
+	}
+	if err == nil {
+		err = s.finalizeProjectVisualTask(*task, result)
 	}
 	if err != nil {
 		channelSlotFailedBeforeRequest := false

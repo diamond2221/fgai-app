@@ -140,11 +140,8 @@ func runClaudeTextTask(ctx context.Context, input canvasGenerationInput) (map[st
 		return nil, err
 	}
 	messages = append(messages, map[string]interface{}{"role": "user", "content": content})
-	maxTokens := 4096
-	if input.MaxOutputTokens > 0 {
-		maxTokens = input.MaxOutputTokens
-	}
-	body := map[string]interface{}{"model": input.Config.Model, "max_tokens": maxTokens, "messages": messages}
+	body := map[string]interface{}{"model": input.Config.Model, "max_tokens": 4096, "messages": messages}
+	applyTextOutputLimit(body, input.MaxOutputTokens, "max_tokens")
 	applyTextThinking(body, input, "claude-api")
 	if systemPrompt := strings.TrimSpace(input.Config.SystemPrompt); systemPrompt != "" {
 		body["system"] = systemPrompt

@@ -19,7 +19,7 @@ func TestFGProjectCharacterAccessFollowsProjectScope(t *testing.T) {
 	sqlDB, _ := db.DB()
 	defer sqlDB.Close()
 	sqlDB.SetMaxOpenConns(1)
-	if err = db.AutoMigrate(&model.Project{}, &model.Asset{}, &model.ProjectAssetLink{}, &model.AssetVersion{}, &model.AssetRepresentation{}, &model.Resource{}); err != nil {
+	if err = db.AutoMigrate(&model.Project{}, &model.Asset{}, &model.ProjectAssetLink{}, &model.AssetVersion{}, &model.AssetRepresentation{}, &model.Resource{}, &model.Shot{}, &model.ShotAssetReference{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, query := range []string{
@@ -50,6 +50,11 @@ func TestFGProjectCharacterAccessFollowsProjectScope(t *testing.T) {
 		if err = db.Create(&model.ProjectAssetLink{ID: project.ID + "-link", ProjectID: project.ID, AssetID: asset.ID}).Error; err != nil {
 			t.Fatal(err)
 		}
+		for _, row := range []any{&model.AssetVersion{ID: project.ID + "-old", AssetID: asset.ID, Version: 1}, &model.Shot{ID: project.ID + "-shot", ProjectID: project.ID, UnitID: "chapter"}, &model.ShotAssetReference{ID: project.ID + "-ref", ShotID: project.ID + "-shot", AssetVersionID: project.ID + "-old"}} {
+			if err = db.Create(row).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	repo := New(db)
 	for _, tc := range []struct {
@@ -74,6 +79,15 @@ func TestFGProjectCharacterAccessFollowsProjectScope(t *testing.T) {
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				t.Fatalf("private or unlinked character exposed: %v", err)
 			}
+			if tc.asset == tc.project+"-character" {
+				assets, workspaceErr := repo.ProjectUnitAssets(tc.actor, tc.project, "chapter")
+				if tc.allowed && (workspaceErr != nil || len(assets) != 1) {
+					t.Fatalf("authorized chapter asset missing: %v, count=%d", workspaceErr, len(assets))
+				}
+				if !tc.allowed && !errors.Is(workspaceErr, gorm.ErrRecordNotFound) {
+					t.Fatalf("private chapter exposed: %v", workspaceErr)
+				}
+			}
 		})
 	}
 	t.Run("shared version publishes its bound image but private version does not", func(t *testing.T) {
@@ -86,7 +100,7 @@ func TestFGProjectCharacterAccessFollowsProjectScope(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			version := model.AssetVersion{ID: project + "-v1", AssetID: asset.ID, Version: 1}
+			version := model.AssetVersion{ID: project + "-v1", AssetID: asset.ID, Version: 2}
 			asset.PrimaryVersionID = version.ID
 			if err := repo.SaveCharacterVersion(project, asset, &version, []model.AssetRepresentation{{ID: project + "-primary", TaskID: project + "-binding", AssetVersionID: version.ID, ResourceID: resource.ID, Role: "primary"}}, nil); err != nil {
 				t.Fatal(err)

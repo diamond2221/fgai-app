@@ -158,9 +158,10 @@ function parseStoryboardRowsPayload(raw: string): { title?: string; rows?: Array
                 const innerParsed = JSON.parse(inner.slice(start, end + 1)) as { title?: string; rows?: Array<Partial<StoryboardRow>> };
                 if (Array.isArray(innerParsed.rows)) return innerParsed;
             } catch {
-                // 内层不是合法 JSON 时落到外层结构，由调用方的缺行校验统一报错。
+                if (/"rows"\s*:/.test(inner)) throw new Error("分镜结果不完整，可能已达到模型输出上限；未写入半批镜头。请重新生成分镜");
             }
         }
+        if (/"rows"\s*:/.test(inner)) throw new Error("分镜结果不完整，可能已达到模型输出上限；未写入半批镜头。请重新生成分镜");
     }
     if (parsed.text && typeof parsed.text === "object") {
         try {

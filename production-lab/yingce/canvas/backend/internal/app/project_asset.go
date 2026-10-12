@@ -55,6 +55,7 @@ type ProjectAssetSummary struct {
 	UpdatedAt        time.Time                `json:"updatedAt"`
 	Source           string                   `json:"source,omitempty"`
 	Character        *CharacterCardSummary    `json:"character,omitempty"`
+	Definition       map[string]any           `json:"definition,omitempty"`
 }
 
 type ProjectAssetFilter struct {
@@ -567,6 +568,19 @@ func (s *Service) projectAssetSummary(userID string, projectID string, asset *mo
 	}
 	storageKey, previewText, source, durationMs := projectAssetPreview(asset.PayloadJSON)
 	summary := ProjectAssetSummary{ID: asset.ID, Title: asset.Title, MediaType: asset.Kind, Category: asset.Category, Status: asset.Status, PrimaryVersionID: asset.PrimaryVersionID, VersionCount: len(versions), Usages: usages, FolderID: link.FolderID, Position: link.Position, StorageKey: storageKey, PreviewText: previewText, DurationMs: durationMs, UpdatedAt: asset.UpdatedAt, Source: source}
+	if asset.Category == model.AssetCategoryEnvironment || asset.Category == model.AssetCategoryProp {
+		for _, version := range versions {
+			if version.ID == asset.PrimaryVersionID {
+				if json.Unmarshal([]byte(version.DefinitionJSON), &summary.Definition) != nil {
+					return ProjectAssetSummary{}, BadAuthRequest("资产设定格式错误")
+				}
+				break
+			}
+		}
+		if summary.PreviewText == "" {
+			summary.PreviewText = projectVisualDefinitionText(summary.Definition)
+		}
+	}
 	if asset.Category == model.AssetCategoryCharacter && asset.PrimaryVersionID != "" {
 		card, cardErr := s.characterCard(userID, asset)
 		if cardErr != nil {

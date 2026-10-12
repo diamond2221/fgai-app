@@ -6,6 +6,7 @@ import { Agent, setGlobalDispatcher } from "undici";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { bridgeModelContext } from "./model-context.mjs";
 
 // Node 自带 undici 的 header/body 超时默认 300 秒，短于文本任务 8 分钟和视频任务 60 分钟。
 // 设为 0 后只由 Go 侧任务期限取消 bridge；这里不再提前切断仍在排队或生成中的步骤。
@@ -154,13 +155,7 @@ async function run() {
           const result = await bridge(request, "/model", {
             modelId: model.id,
             purpose,
-            systemPrompt: context.systemPrompt,
-            messages: context.messages,
-            tools: (context.tools ?? []).map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.parameters,
-            })),
+            ...bridgeModelContext(context),
             thinkingLevel: options?.reasoning ?? "off",
             contextUsage: session.getContextUsage(),
           }, options?.signal);

@@ -486,6 +486,8 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                 }
                 recoveredTaskIdsRef.current.add(task.id);
             }).catch((error) => {
+                // 本轮已失败的恢复只提示一次；轮询刷新不能无限重放损坏的旧结果。
+                recoveredTaskIdsRef.current.add(task.id);
                 message.error(error instanceof Error ? `任务结果恢复失败：${error.message}` : "任务结果恢复失败");
             }).finally(() => recoveringTaskIdsRef.current.delete(task.id));
         }

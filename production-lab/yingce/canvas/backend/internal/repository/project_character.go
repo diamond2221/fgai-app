@@ -11,13 +11,24 @@ import (
 )
 
 func (r *Repository) ProjectCharacterAsset(userID string, projectID string, assetID string) (*model.Asset, error) {
+	asset, err := r.ProjectLinkedAsset(userID, projectID, assetID)
+	if err != nil {
+		return nil, err
+	}
+	if asset.Category != model.AssetCategoryCharacter {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return asset, nil
+}
+
+func (r *Repository) ProjectLinkedAsset(userID string, projectID string, assetID string) (*model.Asset, error) {
 	if _, err := r.ProjectForUser(userID, projectID); err != nil {
 		return nil, err
 	}
 	var asset model.Asset
 	err := r.db.Table("assets").Select("assets.*").
 		Joins("JOIN project_asset_links ON project_asset_links.asset_id = assets.id").
-		Where("assets.id = ? AND assets.category = ? AND project_asset_links.project_id = ?", assetID, model.AssetCategoryCharacter, projectID).
+		Where("assets.id = ? AND project_asset_links.project_id = ?", assetID, projectID).
 		First(&asset).Error
 	if err != nil {
 		return nil, err
