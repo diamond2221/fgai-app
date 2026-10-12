@@ -5,6 +5,14 @@ import test from "node:test";
 import { DEFAULT_VIDEO_PROMPT_MAX_CHARS, defaultModelCapabilityConfig, normalizeImageValue, normalizeVideoValue } from "../src/lib/model-capabilities.ts";
 import { imageTierAvailable, imageResolutionTiers } from "../src/lib/image-size-presets.ts";
 
+test("custom-size wildcard is never submitted as an image size", () => {
+    const image = defaultModelCapabilityConfig("openai-image", "gpt-image-2").image!;
+    image.size = { ...image.size, allowCustom: true, default: "*", values: ["*", "1024x1024"] };
+    assert.equal(normalizeImageValue(image, { size: "*" }).size, "1024x1024");
+    assert.equal(normalizeImageValue(image, {}).size, "1024x1024");
+    assert.equal(normalizeImageValue(image, { size: "1536x1024" }).size, "1536x1024");
+});
+
 test("Kemei Seedream defaults retain official 1K/1.5K/2K sizes without a 4K preset", () => {
     for (const model of ["doubao-seedream-5-0-pro-260628", "doubao-seedream-5-0-flash-260915"]) {
         const image = defaultModelCapabilityConfig("km-kemei-seedream", model).image!;

@@ -2,12 +2,21 @@ import { runBackendCanvasGenerationTask } from "@/lib/canvas/canvas-project-gene
 import { PromptTemplateOperation, promptTemplateTaskPlaceholder } from "@/lib/prompts";
 import { resolveStyleExecutionPlan, serializeStyleProfile, type StyleProfileSnapshot } from "@/lib/canvas/style-profile";
 import { logicalModelIDForConfig, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultImageParamsForModel } from "@/lib/model-selection";
+import { modelCapabilityConfigFor, normalizeImageValue } from "@/lib/model-capabilities";
 
 type ProjectStylePrompt = { id: string; title: string; prompt: string; profile?: StyleProfileSnapshot };
 
+export function characterTurnaroundConfig(config: AiConfig): AiConfig {
+    const model = config.imageModel || config.model;
+    return { ...config, model, imageModel: model, ...defaultImageParamsForModel(config, model), count: "1", taskWorkflowProvider: "model" };
+}
+
 export async function generateCharacterTurnaround(input: { projectId: string; assetId: string; versionId: string; name: string; definition: Record<string, unknown>; projectStyle?: ProjectStylePrompt; config: AiConfig }) {
     const promptTemplateVariables = characterTurnaroundVariables(input.name, input.definition, input.projectStyle);
-    const generationConfig = { ...input.config, model: input.config.imageModel || input.config.model, count: "1" };
+    const model = input.config.imageModel || input.config.model;
+    const profile = modelCapabilityConfigFor(input.config, model).image;
+    const generationConfig = { ...input.config, model, ...(profile ? normalizeImageValue(profile, input.config) : {}), count: "1", taskWorkflowProvider: "model" as const };
     const requestConfig = resolveModelRequestConfig(generationConfig, generationConfig.model);
     const styleExecutionPlan = input.projectStyle?.profile ? resolveStyleExecutionPlan(input.projectStyle.profile, { mode: "image", model: requestConfig.model, interfaceType: requestConfig.interfaceType || requestConfig.apiFormat }) : undefined;
     if (styleExecutionPlan?.status === "blocked" && !logicalModelIDForConfig(generationConfig)) throw new Error(`当前图片模型无法完整执行项目画风：${styleExecutionPlan.warnings.join("；")}。请切换图片模型，或在项目设置中停用对应画风资产`);

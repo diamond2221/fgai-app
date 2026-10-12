@@ -8,7 +8,7 @@ for line in (ROOT/'.env').read_text().splitlines():
  if '=' in line and not line.startswith('#'):
   key,value=line.split('=',1);env[key]=value
 nas=pathlib.Path(env['NAS_MEDIA_PATH'])
-assert (nas/'.fg-studio-nas-ready').read_text().strip()=='fg-studio-media:v1','NAS unavailable; no runtime provisioned'
+from provision_storage import prepare_runtime_storage
 def run(args,optional=False):
  try:result=subprocess.run([DOCKER,*args],capture_output=True,text=True,timeout=30)
  except subprocess.TimeoutExpired:
@@ -17,6 +17,7 @@ def run(args,optional=False):
  if result.returncode and not optional:raise RuntimeError('Creator Docker operation failed; private arguments omitted')
  return result.stdout.strip() if result.returncode==0 else None
 users=json.loads(run(['exec','fg-six-yingce-postgres-1','psql','-U','fg_yingce','-d','fg_yingce','-tAc',"SELECT COALESCE(json_agg(id),'[]') FROM users WHERE status='active' AND id IN(SELECT user_id FROM fg_accounts)"]))
+prepare_runtime_storage(nas, 'opencreator', users)
 gateway='fg-six-yingce-gateway-1'
 image=env.get('CREATOR_RUNTIME_IMAGE','fg-six-creator-runtime:v128')
 image_details=json.loads(run(['image','inspect',image]))[0]
@@ -61,11 +62,7 @@ def safe_subnet(user):
 for user in users:
  assert re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',user)
  identity=user.replace('-','');name='fg-creator-'+identity;network=name+'-private';directory=nas/'opencreator/users'/user
- directory.mkdir(parents=True,exist_ok=True);(directory/'.fg-creator-ready').write_text('FG private creator workspace\n')
  recycle=nas.parent/'recycle/opencreator'/user
- recycle.mkdir(parents=True,exist_ok=True)
- assert recycle.resolve()==recycle and not recycle.is_symlink()
- (recycle/'.fg-recycle-ready').write_text('FG actor recycle v1\n')
  token=hmac.new(env['FG_ADCRAFT_SECRET'].encode(),('fg-creator-v1:'+user).encode(),hashlib.sha256).hexdigest()
  existing=run(['inspect',name],optional=True)
  net=run(['network','inspect',network],optional=True)

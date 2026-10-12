@@ -6,15 +6,20 @@ import json
 import pathlib
 import re
 import subprocess
+import sys
+import fcntl
 
 ROOT=pathlib.Path('/Users/server/work/fg-six-yingce')
 D='/usr/local/bin/docker'
+lock=(ROOT/'.arcreel-provision.lock').open('a')
+try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+except BlockingIOError:raise SystemExit(0)
 env={}
 for line in (ROOT/'.env').read_text().splitlines():
     if '=' in line and not line.startswith('#'):
         key,value=line.split('=',1);env[key]=value
 nas=pathlib.Path(env['NAS_MEDIA_PATH'])
-assert (nas/'.fg-studio-nas-ready').read_text().strip()=='fg-studio-media:v1'
+from provision_storage import prepare_runtime_storage
 
 def run(*args,optional=False):
     try: result=subprocess.run([D,*args],capture_output=True,text=True,timeout=45)
@@ -25,14 +30,17 @@ def run(*args,optional=False):
     return result.stdout.strip() if result.returncode==0 else None
 
 users=json.loads(run('exec','fg-six-yingce-postgres-1','psql','-U','fg_yingce','-d','fg_yingce','-tAc',"SELECT COALESCE(json_agg(r.actor_id),'[]') FROM fg_arcreel_runtimes r JOIN users u ON u.id=r.actor_id WHERE u.status='active'"))
+metrics=ROOT/'host-metrics'
+try:endpoints=json.loads((metrics/'arcreel-runtimes.json').read_text())
+except FileNotFoundError:endpoints={}
+if '--requested-only' in sys.argv:
+    users=[user for user in users if user not in endpoints]
 if not users:raise SystemExit(0)
+prepare_runtime_storage(nas, 'arcreel', users)
 image=env.get('ARCREEL_RUNTIME_IMAGE','fg-six-arcreel:v130')
 image_id=json.loads(run('image','inspect',image))[0]['Id']
 gateway='fg-six-yingce-gateway-1'
 attached=json.loads(run('inspect',gateway))[0]['NetworkSettings']['Networks']
-metrics=ROOT/'host-metrics'
-try:endpoints=json.loads((metrics/'arcreel-runtimes.json').read_text())
-except FileNotFoundError:endpoints={}
 
 def safe_subnet(actor):
     names=run('network','ls','-q').split()
@@ -62,13 +70,7 @@ for actor in users:
     assert re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',actor)
     name='fg-arcreel-'+actor.replace('-','');network=name+'-private'
     root=nas/'arcreel/users';directory=root/actor
-    directory.mkdir(parents=True,exist_ok=True)
-    assert directory.resolve().parent==root.resolve() and not directory.is_symlink()
-    (directory/'.fg-arcreel-ready').write_text('FG private ArcReel workspace\n')
     recycle=nas.parent/'recycle/arcreel'/actor
-    recycle.mkdir(parents=True,exist_ok=True)
-    assert recycle.resolve()==recycle and not recycle.is_symlink()
-    (recycle/'.fg-recycle-ready').write_text('FG actor recycle v1\n')
     capability=hmac.new(env['FG_ADCRAFT_SECRET'].encode(),('fg-creator-v1:'+actor).encode(),hashlib.sha256).hexdigest()
     net=run('network','inspect',network,optional=True)
     if not net:run('network','create','--subnet',safe_subnet(actor),network)

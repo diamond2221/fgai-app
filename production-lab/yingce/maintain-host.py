@@ -140,6 +140,10 @@ with (ROOT / '.maintenance.lock').open('a') as lock:
             try:
                 result = subprocess.run([sys.executable, str(script)], timeout=180, capture_output=True)
                 provision_status[kind] = 'ready' if result.returncode == 0 else 'failed'
+                if result.returncode:
+                    # Report only a known exception class, never private arguments or stderr.
+                    diagnostic = result.stderr.decode('utf-8', errors='replace')
+                    provision_status[kind + 'Failure'] = next((name for name in ('PermissionError', 'FileNotFoundError', 'AssertionError', 'RuntimeError') if name in diagnostic), 'ProcessError')
             except subprocess.TimeoutExpired:
                 provision_status[kind] = 'timeout'
             except OSError:

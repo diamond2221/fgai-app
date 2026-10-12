@@ -19,6 +19,12 @@ import { ASSET_CATEGORIES, defaultAssetCategoryForKind, normalizeAssetCategory }
 import { resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey } from "@/services/api/resources";
 import { downloadBrowserMedia } from "@/services/browser-download";
 import { uploadMediaFile } from "@/services/file-storage";
+import { uploadImage } from "@/services/image-storage";
+import { ModelPicker } from "@/components/model-picker";
+import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { FGPricePreview } from "@/components/fg-price-preview";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import {
     bindProjectCharacterVoice,
     confirmProjectAssetCandidate,
@@ -49,7 +55,7 @@ import { CanvasNodeType, type CanvasFolderStyle, type CanvasFolderTheme, type Ca
 import { ProjectCharacterCard } from "./project-character-card";
 import { projectCharacterCover } from "./project-character-cover";
 import { linkSelectedProjectAssets } from "./project-asset-linking";
-import { generateCharacterTurnaround } from "./project-character-media";
+import { characterTurnaroundConfig, generateCharacterTurnaround } from "./project-character-media";
 import { categoryLabels, categoryLabel, mediaLabel, StatusPill, formatTime, textValue, type ProjectDetailViewProps } from "./shared";
 
 const categories = ["all", ...ASSET_CATEGORIES];
@@ -84,6 +90,9 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     const [addOpen, setAddOpen] = useState(false);
     const [editorAsset, setEditorAsset] = useState<ProjectAsset | "new" | null>(null);
     const [imageAsset, setImageAsset] = useState<ProjectAsset | null>(null);
+    const [turnaroundAsset, setTurnaroundAsset] = useState<ProjectAsset | null>(null);
+    const [turnaroundConfig, setTurnaroundConfig] = useState(() => characterTurnaroundConfig(effectiveConfig));
+    const theme = canvasThemes[useActiveTheme()] || canvasThemes.dark;
     const externalAssetSources = useExternalAssetSources(addOpen || Boolean(imageAsset));
     const [voiceAsset, setVoiceAsset] = useState<ProjectAsset | null>(null);
     const [previewAsset, setPreviewAsset] = useState<ProjectAsset | null>(null);
@@ -324,23 +333,22 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
         mutationKey: ["project-character-turnaround", detail.project.id],
         mutationFn: async (asset: ProjectAsset) => {
             if (!asset.character) throw new Error("角色版本信息不完整");
-            const model = effectiveConfig.imageModel || effectiveConfig.model;
-            const config = { ...effectiveConfig, model };
+            const model = turnaroundConfig.model;
+            const config = { ...turnaroundConfig, imageModel: model };
             if (!isAiConfigReady(config, model)) throw new Error("请先在设置中配置可用的图片模型");
             const projectStyle = resolveProjectCanvasStyle(detail.project.stylePresetId, detail.project.styleProfileJson);
             await generateCharacterTurnaround({ projectId: detail.project.id, assetId: asset.id, versionId: asset.character.versionId, name: asset.title, definition: asset.character.definition, projectStyle, config });
             return getProjectCharacter(detail.project.id, asset.id);
         },
-        onSuccess: (result) => { syncPersonalCharacterProjection(result.asset); done("三视图已生成并绑定到新角色版本"); },
+        onSuccess: (result) => { syncPersonalCharacterProjection(result.asset); setTurnaroundAsset(null); done("三视图已生成并绑定到新角色版本"); },
         onError: failed("三视图生成失败"),
     });
     const bindImagesMutation = useMutation({
-        mutationFn: async (selectedAssetId: string) => {
+        mutationFn: async ({ selectedAssetId, pickedItem }: { selectedAssetId: string; pickedItem?: AssetLibraryPickerItem }) => {
             if (!imageAsset) throw new Error("未选择角色");
-            await saveRemoteUserDataNow();
             const latest = useAssetStore.getState().assets;
-            const pickerItem = imagePickerItems.find((item) => item.id === selectedAssetId);
-            const selected = latest.find((asset) => asset.id === selectedAssetId) || (pickerItem?.external ? await externalAssetSources.importExternalAsset(pickerItem.external) : undefined);
+            const pickerItem = pickedItem || imagePickerItems.find((item) => item.id === selectedAssetId);
+            const selected = latest.find((asset) => asset.id === selectedAssetId) || pickerItem?.asset || (pickerItem?.external ? await externalAssetSources.importExternalAsset(pickerItem.external) : undefined);
             if (selected?.kind !== "image") throw new Error("请选择一张包含正面、侧面和背面的三视图设定图");
             const resourceId = resourceIdFromStorageKey((selected as ImageAsset).data.storageKey);
             if (!resourceId) throw new Error("所选图片尚未同步到后端资源库");
@@ -358,6 +366,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
         form.setFieldsValue({ name: asset === "new" ? "" : asset.title, ...Object.fromEntries(characterFields.map(([key]) => [key, fieldValue(definition[key])])) } as CharacterForm);
     };
     const openImages = (asset: ProjectAsset) => setImageAsset(asset);
+    const openTurnaround = (asset: ProjectAsset) => { setTurnaroundConfig(characterTurnaroundConfig(effectiveConfig)); setTurnaroundAsset(asset); };
     const openVoice = (asset: ProjectAsset) => { const sampleResourceId = asset.character?.voice?.profile.sampleResourceId || ""; setVoiceAsset(asset); setVoiceSample(sampleResourceId ? { resourceId: sampleResourceId, name: asset.character?.voice?.profile.name || "当前声音", url: resourceFileUrl(sampleResourceId) } : null); setVoiceInstructions(asset.character?.voice?.instructions || ""); };
     const openFolderEditor = (folder?: ProjectAssetFolder, parentId = folderId === ALL_FOLDERS ? "" : folderId) => {
         setFolderEditor({ folder, parentId: folder?.parentId || parentId });
@@ -468,7 +477,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                         </section>
                     ) : null}
                     <div className="mb-2 flex items-center justify-between text-xs text-foreground/45"><span>{currentFolder?.name || (folderId === ALL_FOLDERS ? (category === "all" ? "全部资产" : categoryLabel(category)) : "根目录内容")}</span><span>{assetsQuery.data?.total || 0} 项已确认</span></div>
-                    {assetsQuery.isLoading ? <WorkspaceState icon="assets" compact title="正在读取资产" description="按当前目录、分类和关键词加载这一页。" /> : visibleAssets.length ? <><div className="project-assets-grid assets-library-grid">{visibleAssets.map((asset) => asset.category === "character" ? <ProjectCharacterCard key={asset.id} asset={asset} folderItems={folderMoveItems} generating={generatingAssetIds.has(asset.id)} removing={(moveMutation.isPending && moveMutation.variables?.id === asset.id) || (unlinkMutation.isPending && unlinkMutation.variables === asset.id)} onOpen={() => setPreviewAsset(asset)} onEdit={() => openCharacterEditor(asset)} onGenerate={() => generateMutation.mutate(asset)} onBindImages={() => openImages(asset)} onBindVoice={() => openVoice(asset)} onMove={(nextFolderId) => moveMutation.mutate({ id: asset.id, nextFolderId })} onRemove={() => unlinkMutation.mutate(asset.id)} /> : <MediaAssetCard key={asset.id} asset={asset} personalAsset={personalAssets.find((item) => item.id === asset.id)} folderItems={folderMoveItems} onOpen={() => setPreviewAsset(asset)} onMove={(nextFolderId) => moveMutation.mutate({ id: asset.id, nextFolderId })} onCategoryChange={(next) => categoryMutation.mutate({ id: asset.id, next })} onVersion={() => versionMutation.mutate(asset.id)} onRemove={() => unlinkMutation.mutate(asset.id)} loading={(moveMutation.isPending && moveMutation.variables?.id === asset.id) || (categoryMutation.isPending && categoryMutation.variables?.id === asset.id) || (versionMutation.isPending && versionMutation.variables === asset.id) || (unlinkMutation.isPending && unlinkMutation.variables === asset.id)} />)}</div><PaginationBar current={page} pageSize={pageSize} total={assetsQuery.data?.total || 0} itemLabel="项" pageSizeOptions={[20, 40, 80]} onChange={(nextPage, nextPageSize) => { setPage(nextPageSize !== pageSize ? 1 : nextPage); setPageSize(nextPageSize); }} /></> : childFolders.length || (showPendingCandidates && pendingCandidates.length) ? null : <WorkspaceState icon="assets" compact title={debouncedKeyword ? "没有找到匹配资产" : "这个文件夹还没有内容"} description={debouncedKeyword ? "换一个关键词，或调整左侧分类与目录筛选。" : "可以新建子文件夹、引用个人素材，或把画布产物归档到这里。"} />}
+                    {assetsQuery.isLoading ? <WorkspaceState icon="assets" compact title="正在读取资产" description="按当前目录、分类和关键词加载这一页。" /> : visibleAssets.length ? <><div className="project-assets-grid assets-library-grid">{visibleAssets.map((asset) => asset.category === "character" ? <ProjectCharacterCard key={asset.id} asset={asset} folderItems={folderMoveItems} generating={generatingAssetIds.has(asset.id)} removing={(moveMutation.isPending && moveMutation.variables?.id === asset.id) || (unlinkMutation.isPending && unlinkMutation.variables === asset.id)} onOpen={() => setPreviewAsset(asset)} onEdit={() => openCharacterEditor(asset)} onGenerate={() => openTurnaround(asset)} onBindImages={() => openImages(asset)} onBindVoice={() => openVoice(asset)} onMove={(nextFolderId) => moveMutation.mutate({ id: asset.id, nextFolderId })} onRemove={() => unlinkMutation.mutate(asset.id)} /> : <MediaAssetCard key={asset.id} asset={asset} personalAsset={personalAssets.find((item) => item.id === asset.id)} folderItems={folderMoveItems} onOpen={() => setPreviewAsset(asset)} onMove={(nextFolderId) => moveMutation.mutate({ id: asset.id, nextFolderId })} onCategoryChange={(next) => categoryMutation.mutate({ id: asset.id, next })} onVersion={() => versionMutation.mutate(asset.id)} onRemove={() => unlinkMutation.mutate(asset.id)} loading={(moveMutation.isPending && moveMutation.variables?.id === asset.id) || (categoryMutation.isPending && categoryMutation.variables?.id === asset.id) || (versionMutation.isPending && versionMutation.variables === asset.id) || (unlinkMutation.isPending && unlinkMutation.variables === asset.id)} />)}</div><PaginationBar current={page} pageSize={pageSize} total={assetsQuery.data?.total || 0} itemLabel="项" pageSizeOptions={[20, 40, 80]} onChange={(nextPage, nextPageSize) => { setPage(nextPageSize !== pageSize ? 1 : nextPage); setPageSize(nextPageSize); }} /></> : childFolders.length || (showPendingCandidates && pendingCandidates.length) ? null : <WorkspaceState icon="assets" compact title={debouncedKeyword ? "没有找到匹配资产" : "这个文件夹还没有内容"} description={debouncedKeyword ? "换一个关键词，或调整左侧分类与目录筛选。" : "可以新建子文件夹、引用个人素材，或把画布产物归档到这里。"} />}
                 </div>
             </div>
 
@@ -492,6 +501,15 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
             />
             <ProjectAssetPreviewModal asset={previewAsset} personalAsset={previewAsset ? personalAssets.find((item) => item.id === previewAsset.id) : undefined} onClose={() => setPreviewAsset(null)} onDownload={() => previewAsset && downloadPreviewAsset(previewAsset)} onReplaceImage={() => { if (!previewAsset || previewAsset.category !== "character") return; setPreviewAsset(null); openImages(previewAsset); }} />
             <CharacterEditorModal open={Boolean(editorAsset)} editing={editorAsset !== "new"} form={form} loading={saveCharacter.isPending} onClose={() => setEditorAsset(null)} onSave={() => form.validateFields().then((values) => saveCharacter.mutate(values))} />
+            <Modal className="workspace-modal workspace-modal-compact" title={`生成角色三视图 · ${turnaroundAsset?.title || ""}`} open={Boolean(turnaroundAsset)} okText="生成一张三视图" cancelText="取消" confirmLoading={generateMutation.isPending} onCancel={() => { if (!generateMutation.isPending) setTurnaroundAsset(null); }} onOk={() => { if (turnaroundAsset) generateMutation.mutate(turnaroundAsset); }}>
+                <div className="grid gap-4">
+                    <p className="text-sm text-foreground/60">根据已保存的角色设定和项目画风生成正面、侧面、背面的设定图。可先通过角色卡的编辑按钮调整外貌与三视图补充约束。</p>
+                    <ModelPicker config={turnaroundConfig} value={turnaroundConfig.model} capability="image" onChange={(model) => setTurnaroundConfig(characterTurnaroundConfig({ ...effectiveConfig, imageModel: model, model }))} />
+                    <ImageSettingsPanel config={turnaroundConfig} theme={theme} showCount={false} onConfigChange={(key, value) => setTurnaroundConfig((current) => ({ ...current, [key]: value }))} />
+                    <FGPricePreview config={turnaroundConfig} model={turnaroundConfig.model} mode="image" />
+                    <Button onClick={() => { if (turnaroundAsset) { setImageAsset(turnaroundAsset); setTurnaroundAsset(null); } }}>改为选择或上传已有三视图</Button>
+                </div>
+            </Modal>
             <Modal className="workspace-modal workspace-modal-compact" title={folderEditor?.folder ? "重命名文件夹" : "新建文件夹"} open={Boolean(folderEditor)} okText={folderEditor?.folder ? "保存" : "创建"} cancelText="取消" okButtonProps={{ loading: createFolderMutation.isPending || renameFolderMutation.isPending }} onCancel={() => { setFolderEditor(null); setFolderName(""); }} onOk={saveFolder}>
                 <div className="grid gap-2"><span className="text-[var(--fs-label)] text-foreground/48">位置：{folderEditor ? projectAssetFolderParentLabel(assetFolders, folderEditor.parentId) : ""}</span><Input autoFocus maxLength={60} value={folderName} placeholder="输入文件夹名称" onChange={(event) => setFolderName(event.target.value)} onPressEnter={saveFolder} /></div>
             </Modal>
@@ -499,6 +517,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 open={Boolean(imageAsset)}
                 remoteLibrary
                 remoteKind="image"
+                acceptRemoteItems
                 items={imagePickerItems}
                 categoryLabels={{ ...pickerCategoryLabels, ...externalAssetSources.categoryLabels }}
                 folders={externalAssetSources.folders}
@@ -510,9 +529,17 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 emptyTitle="没有可绑定的图片"
                 emptyDescription="需要一张包含正面、侧面、背面的角色设定图。"
                 onClose={() => setImageAsset(null)}
-                onConfirm={async (ids) => {
+                upload={{ accept: "image/png,image/jpeg,image/webp", description: "上传角色三视图，保存到个人素材库后绑定", onUpload: async (files) => {
+                    const ids: string[] = [];
+                    for (const file of Array.from(files)) {
+                        const uploaded = await uploadImage(file);
+                        ids.push(addAsset({ kind: "image", title: file.name.replace(/\.[^.]+$/, ""), coverUrl: uploaded.url, tags: ["角色三视图"], status: "confirmed", source: "角色卡", data: { dataUrl: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width, height: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType } }));
+                    }
+                    return ids;
+                } }}
+                onConfirm={async (ids, pickedItems) => {
                     if (!ids[0]) throw new Error("请选择一张三视图设定图");
-                    await bindImagesMutation.mutateAsync(ids[0]);
+                    await bindImagesMutation.mutateAsync({ selectedAssetId: ids[0], pickedItem: pickedItems?.find((item) => item.id === ids[0]) });
                 }}
             />
             <AssetLibraryPickerModal

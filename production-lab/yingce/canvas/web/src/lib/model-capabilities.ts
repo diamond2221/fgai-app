@@ -542,9 +542,12 @@ function imagePresetTierForSelection(profile: ImageCapabilityConfig, size: strin
 
 export function normalizeImageSizeSetting(profile: ImageCapabilityConfig, value?: string) {
     if (profile.size.parameter === "none") return "auto";
-    const candidate = value?.trim() || profile.size.default;
+    // A wildcard declares custom-size support; it is not a submitted image size.
+    const fallback = profile.size.default && profile.size.default !== "*" ? profile.size.default : profile.size.values.find((size) => size !== "*") || "auto";
+    const requested = value?.trim();
+    const candidate = requested && requested !== "*" ? requested : fallback;
     if (profile.size.allowCustom || profile.size.values.includes(candidate)) return candidate;
-    return profile.size.default || profile.size.values[0] || "auto";
+    return fallback;
 }
 
 export function imageSizeRequest(profile: ImageCapabilityConfig, value?: string) {
