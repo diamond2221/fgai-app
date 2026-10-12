@@ -56,7 +56,7 @@ import {
     formatDuration,
     type ShortDramaWorkflowStage,
 } from "./workflow-shared";
-import { buildShotAssetReferenceContext, ensureShotAssetMentionPrompt, resolveShotAssetMentionPrompt } from "./workflow-shot-references";
+import { buildShotAssetReferenceContext, ensureShotAssetMentionPrompt, inferShotVisualAssets, resolveShotAssetMentionPrompt } from "./workflow-shot-references";
 import { Select } from "@/components/ui/base/select";
 
 type ShotEditorValues = Omit<ShotRevisionInput, "durationMs"> & {
@@ -99,8 +99,12 @@ export default function WorkflowProductionWorkbench(props: Props) {
     const [imagePreviewArtifact, setImagePreviewArtifact] = useState<ShotArtifact | null>(null);
     const [editorDirty, setEditorDirty] = useState(false);
     const [submittingShotIds, setSubmittingShotIds] = useState<Set<string>>(() => new Set());
+    const checkedAssetShots = useRef(new Set<string>());
+    const [associatingShotIds, setAssociatingShotIds] = useState<Set<string>>(() => new Set());
+    const assetsAssociating = Boolean(selectedShot && associatingShotIds.has(selectedShot.id));
     const [taskClock, setTaskClock] = useState(() => Date.now());
     const activeShotIdRef = useRef(selectedShot?.id || "");
+    const hydratedShotRevisionKey = useRef("");
     activeShotIdRef.current = selectedShot?.id || "";
     const shots = useMemo(() => (detail.shots || []).filter((item) => item.unitId === unitId).slice().sort((left, right) => left.position - right.position), [detail.shots, unitId]);
     const shotIndex = selectedShot ? shots.findIndex((item) => item.id === selectedShot.id) : -1;
@@ -234,6 +238,18 @@ export default function WorkflowProductionWorkbench(props: Props) {
     }, [creditsEnabled, quoteRequestKey]);
 
     useEffect(() => {
+        const key = `${selectedShot?.id || ""}:${revision?.id || ""}`;
+        if (hydratedShotRevisionKey.current === key) {
+            // 自动关联或人工核对资产只补引用，不覆盖正在编辑的脚本。
+            const currentPrompt = form.getFieldValue("videoPrompt") || "";
+            const nextPrompt = ensureShotAssetMentionPrompt(currentPrompt, shotAssetReferenceContext.mentionReferences);
+            if (nextPrompt !== currentPrompt) {
+                form.setFieldValue("videoPrompt", nextPrompt);
+                setEditorDirty(true);
+            }
+            return;
+        }
+        hydratedShotRevisionKey.current = key;
         const shotDurationSeconds = Math.max(0.5, (revision?.durationMs || selectedShot?.durationMs || 3000) / 1000);
         const currentModel = selectedModelRef.current || initialModel;
         const normalizedDurationSeconds = generationCapability === "video" && currentModel && !segmentPlan
@@ -325,8 +341,33 @@ export default function WorkflowProductionWorkbench(props: Props) {
         onError: (error) => message.error(error instanceof Error ? error.message : "镜头资产更新失败"),
     });
 
+    const associateShotAssets = async (shot: ProjectShot, text: string) => {
+        const linked = new Set(detail.shotReferences.filter((reference) => reference.shotId === shot.id && reference.status === "linked").map((reference) => reference.assetVersionId));
+        const candidates = inferShotVisualAssets(detail.assets, text).filter((asset) => !linked.has(asset.primaryVersionId!));
+        if (!candidates.length) return;
+        if (linked.size + candidates.length > 6) throw new Error("该片段匹配的参考资产超过 6 项，请从左侧资产栏核对选择");
+        setAssociatingShotIds((current) => new Set(current).add(shot.id));
+        try {
+            for (const asset of candidates) await linkShotAsset(projectId, shot.id, { assetVersionId: asset.primaryVersionId!, role: "reference" });
+            await onRefresh();
+        } finally {
+            setAssociatingShotIds((current) => { const next = new Set(current); next.delete(shot.id); return next; });
+        }
+    };
+
+    useEffect(() => {
+        if (!selectedShot || checkedAssetShots.current.has(selectedShot.id) || !detail.assets.length) return;
+        checkedAssetShots.current.add(selectedShot.id);
+        // 已有人工绑定保持原样；旧分镜第一次打开时补齐明确出现的视觉资产。
+        if (detail.shotReferences.some((reference) => reference.shotId === selectedShot.id && reference.status === "linked")) return;
+        const text = [revision?.plotDescription || selectedShot.description, revision?.videoPrompt, revision?.imagePrompt, revision?.action].filter(Boolean).join("\n");
+        void associateShotAssets(selectedShot, text).catch((error) => message.error(error instanceof Error ? error.message : "自动关联资产失败，请核对后重试"));
+        // 每张镜头只自动关联一次，后续保留人工取消和替换的选择。
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedShot?.id, revision?.id, detail.assets, detail.shotReferences]);
+
     const generateArtifact = async () => {
-        if (!selectedShot || submittingShotIds.has(selectedShot.id)) return;
+        if (!selectedShot || submittingShotIds.has(selectedShot.id) || assetsAssociating) return;
         const submittingShot = selectedShot;
         setSubmittingShotIds((current) => new Set(current).add(submittingShot.id));
         try {
@@ -488,7 +529,8 @@ export default function WorkflowProductionWorkbench(props: Props) {
                             <div className="workflow-form-section-heading"><span>镜头脚本</span><small>先写清镜头里发生什么，再调整生成参数</small></div>
                             <Form.Item name="title" label="镜头名称" rules={[{ required: true, message: "请输入镜头名称" }]}><Input placeholder="用一句话概括这个镜头" /></Form.Item>
                             <Form.Item name="videoPrompt" label="视频提示词" rules={[{ required: true, message: "请输入视频提示词" }]}><ShotAssetMentionTextarea references={shotAssetReferenceContext.mentionReferences} /></Form.Item>
-                            <BoundAssets detail={detail} shotId={selectedShot.id} changing={changeAssetBinding.isPending} onUnlink={(reference) => changeAssetBinding.mutate({ reference })} />
+                            <div className="mb-2 flex items-center justify-between gap-2 text-xs text-foreground/60"><span>{assetsAssociating ? "正在自动关联本片段的图片资产…" : "根据片段匹配角色、场景和道具；可从左侧资产栏核对调整"}</span><Button size="small" loading={assetsAssociating} disabled={changeAssetBinding.isPending} onClick={() => void associateShotAssets(selectedShot, [form.getFieldValue("plotDescription"), form.getFieldValue("videoPrompt"), form.getFieldValue("action")].join("\n")).catch((error) => message.error(error instanceof Error ? error.message : "自动关联资产失败"))}>重新匹配资产</Button></div>
+                            <BoundAssets detail={detail} shotId={selectedShot.id} changing={changeAssetBinding.isPending || assetsAssociating} onUnlink={(reference) => changeAssetBinding.mutate({ reference })} />
                             <div className="workflow-form-grid">
                                 <Form.Item name="action" label="表演与动作"><Input.TextArea autoSize={{ minRows: 3, maxRows: 6 }} placeholder="按动作节拍描述人物表演、走位和物体运动" /></Form.Item>
                                 <Form.Item name="dialogue" label="对白 / 旁白"><Input.TextArea autoSize={{ minRows: 3, maxRows: 6 }} placeholder="填写对白、旁白或需要保留的声音信息" /></Form.Item>
@@ -646,20 +688,30 @@ function AssetLibrary({ detail, referenceByVersionId, changing, onToggle }: { de
 
 function ShotAssetMentionTextarea({ value = "", onChange = () => undefined, references, variant = "motion" }: { value?: string; onChange?: (value: string) => void; references: ReturnType<typeof buildShotAssetReferenceContext>["mentionReferences"]; variant?: "scene" | "motion" }) {
     const isScene = variant === "scene";
-    return (
+    const [expanded, setExpanded] = useState(false);
+    const editor = (large = false) => (
         <CanvasResourceMentionTextarea
             value={value}
             references={references}
             onChange={onChange}
             sendOnEnter={false}
-            containerClassName={`workflow-shot-mention-container ${isScene ? "is-scene" : ""}`}
+            containerClassName={`workflow-shot-mention-container ${large ? "is-expanded" : isScene ? "is-scene" : ""}`}
             className={`thin-scrollbar workflow-shot-mention-editor ${isScene ? "is-scene" : ""}`}
+            style={{ color: "var(--foreground)" }}
             placeholder={isScene
                 ? references.length ? "描述主体、场景、动作、构图与光线；输入 @ 可引用已绑定资产" : "描述主体、场景、动作、构图与光线；先绑定资产后可用 @ 引用"
                 : references.length ? "补充动作节奏、运镜变化和动态细节；输入 @ 可引用已绑定资产" : "补充动作节奏、运镜变化和动态细节；绑定资产后可用 @ 引用"}
             aria-label={isScene ? "镜头画面，可使用 @ 引用已绑定资产" : "视频提示词，可使用 @ 引用已绑定资产"}
         />
     );
+    return <>
+        {!isScene && <div className="mb-2 flex justify-end"><Button type="text" size="small" icon={<Maximize2 className="size-3.5" />} onClick={() => setExpanded(true)}>展开编辑完整提示词</Button></div>}
+        {editor()}
+        <AppModal title="视频提示词 · 完整编辑" open={expanded} width={1000} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
+            <p className="mb-3 text-sm text-foreground/65">修改与当前镜头同步；输入 @ 可引用已绑定资产，关闭后可保存脚本。</p>
+            {editor(true)}
+        </AppModal>
+    </>;
 }
 
 function EpisodeLibrary({ detail, activeUnitId, projectId, activeStage }: { detail: ProjectDetail; activeUnitId: string; projectId: string; activeStage: ShortDramaWorkflowStage }) {

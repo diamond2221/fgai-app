@@ -114,6 +114,17 @@ export function repairPendingCanvasMutationRequest(request: CanvasOperationsRequ
     });
     const operations = kept.map((operation) => {
         if (operation.type === "patch_node") {
+            if (!Object.keys(operation.patch).length || !Object.keys(operation.before || {}).length) {
+                const beforeNode = baseline?.nodes.find((node) => node.id === operation.id);
+                const afterNode = prepared?.nodes.find((node) => node.id === operation.id);
+                // 上游 #744：被拒绝的空补丁从原快照重建；有效请求保留幂等摘要。
+                if (beforeNode && afterNode) {
+                    const diff = diffCanvasObject(beforeNode as unknown as Record<string, unknown>, afterNode as unknown as Record<string, unknown>);
+                    changed = true;
+                    if (!Object.keys(diff.patch).length) return undefined;
+                    return { ...operation, patch: diff.patch, before: diff.previous };
+                }
+            }
             const node = baseline?.nodes.find((item) => item.id === operation.id);
             if (!node) return operation;
             const before = { ...operation.before };
@@ -139,7 +150,7 @@ export function repairPendingCanvasMutationRequest(request: CanvasOperationsRequ
             value: hasValue ? operation.value : canvasOperationValue(prepared?.[operation.field]),
             beforeValue: hasBefore ? operation.beforeValue : canvasOperationValue(baseline?.[operation.field]),
         };
-    });
+    }).filter((operation): operation is CanvasOperation => operation !== undefined);
     // 整笔没有实际编辑的旧请求可以丢弃；混合请求保留原操作，避免改变已提交请求的幂等摘要。
     if (operations.length && operations.every((operation) => operation.type === "set_field" && canvasOperationValueEqual(operation.beforeValue, operation.value))) {
         return { ...request, operations: [] };
@@ -859,11 +870,15 @@ export async function saveRemoteUserDataNow(input?: string | readonly string[]) 
     if (!activeRemoteUserId) throw new Error("云端同步会话尚未建立，当前内容已保留在本地");
     requireRemoteUserDataBaseline();
     await waitForRemoteProjectLoads();
-    if (syncPromise) {
+    while (syncPromise) {
+        const pending = syncPromise;
         syncQueued = true;
-        await syncPromise;
+        try { await pending; } catch (error) {
+            // 定向保存必须自己确认当前画布；其他画布的失败不能替代本次保存结果。
+            if (projectId === undefined) throw error;
+        }
         if (epoch !== sessionEpoch) throw new Error("账号已切换，已停止旧会话保存");
-        return;
+        if (projectId === undefined) return;
     }
     syncPromise = withRemoteUserDataSyncExclusive(async () => {
         requireRemoteUserDataBaseline();
@@ -1011,9 +1026,10 @@ async function saveRemoteUserDataBatch(uploaded: Map<string, string>, options: {
         const selected = selectedProjectIds === undefined || selectedProjectIds.has(project.id);
         return selected && dirty;
     });
+    const scopedAssetIds = collectAssetIds(currentProjects.filter((project) => selectedProjectIds?.has(project.id)));
     const dirtyAssets = currentAssets.filter((asset) => {
         const dirty = !sameEntitySnapshot(acknowledgedAssets.get(asset.id), asset);
-        return dirty;
+        return dirty && (selectedProjectIds === undefined || scopedAssetIds.has(asset.id));
     });
     if (!dirtyProjects.length && !dirtyAssets.length) return;
 

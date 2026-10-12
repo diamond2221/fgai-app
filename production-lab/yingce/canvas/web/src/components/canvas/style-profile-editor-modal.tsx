@@ -180,7 +180,7 @@ function ExecutionFields({ profile, onChange, onEditAssets }: EditorFieldsProps 
     const enabled = profile.assets.filter((asset) => asset.enabled !== false);
     return (
         <div className="space-y-5">
-            <SectionHeading title="生成执行" description="控制模型资产不兼容时是继续使用 Prompt，还是阻止任务" />
+            <SectionHeading title="风格资产的使用方式" description="先在「Prompt 规则」填写画风；LoRA 和参考图为可选配置。" />
             <Field label="执行策略">
                 <Segmented
                     block
@@ -188,6 +188,7 @@ function ExecutionFields({ profile, onChange, onEditAssets }: EditorFieldsProps 
                     options={[{ value: "compatible-fallback", label: "兼容降级" }, { value: "strict-assets", label: "严格阻止" }]}
                     onChange={(executionPolicy) => onChange({ executionPolicy: executionPolicy as StyleProfileSnapshot["executionPolicy"] })}
                 />
+                <p className="mt-2 text-sm leading-6 text-foreground/70">{profile.executionPolicy === "strict-assets" ? "所选渠道必须支持已启用的风格资产，否则停止生成。" : "所选渠道不支持某项风格资产时，继续使用文字画风提示词。"}</p>
             </Field>
             <div className="flex flex-col gap-3 border-y border-border py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>

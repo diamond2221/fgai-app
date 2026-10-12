@@ -524,7 +524,8 @@
 .workflow-bound-asset-chip > button > svg { width: 13px; height: 13px; }
 
 .workflow-shot-mention-container {
-    min-height: 82px;
+    height: clamp(240px, 30vh, 420px);
+    min-height: 240px;
     overflow: visible;
     border: 1px solid var(--workspace-border-strong);
     border-radius: var(--r-md);
@@ -532,7 +533,8 @@
     transition: border-color var(--motion-instant) ease-out, box-shadow var(--motion-instant) ease-out;
 }
 
-.workflow-shot-mention-container.is-scene { min-height: 116px; }
+.workflow-shot-mention-container.is-scene { height: 160px; min-height: 160px; }
+.workflow-shot-mention-container.is-expanded { height: min(65vh, 700px); min-height: 240px; }
 
 .workflow-shot-mention-container:focus-within {
     border-color: var(--workspace-accent);
@@ -542,16 +544,16 @@
 .workflow-shot-mention-editor {
     display: block;
     width: 100%;
-    min-height: 80px;
-    max-height: 144px;
+    min-height: 240px;
+    max-height: none;
     resize: vertical;
     overflow-y: auto;
     border: 0;
     background: transparent;
-    padding: 8px 11px;
+    padding: 12px 14px;
     color: var(--foreground);
     font-size: var(--fs-body);
-    line-height: 1.55;
+    line-height: 1.8;
     outline: 0;
 }
 

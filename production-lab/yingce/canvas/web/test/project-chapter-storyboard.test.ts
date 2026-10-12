@@ -10,6 +10,16 @@ import type { ProjectDetail } from "@/services/api/projects";
 import type { StoryboardRow } from "@/types/canvas";
 
 describe("章节分镜写入分镜制作", () => {
+    test("模型只返回人物名称时自动关联已有图片资产", () => {
+        const row = storyboardRow();
+        row.assetBindings = [];
+        row.characters = [{ characterName: "林默" }];
+        const detail = projectDetail();
+        detail.assets[0].storageKey = "resource:character-image";
+        const [shot] = storyboardRowsToProjectShots([row], detail);
+        expect(shot.assetVersionIds).toEqual(["asset-version-1"]);
+        expect(shot.revision.videoPrompt).toContain("@[asset:character-1]");
+    });
     test("将分镜任务结果完整映射为镜头脚本", () => {
         const shots = storyboardRowsToProjectShots([storyboardRow()], projectDetail());
 

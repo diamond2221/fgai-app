@@ -22,6 +22,15 @@ function canvas(patch: Partial<CanvasProject> = {}): CanvasProject {
 }
 
 describe("画布 operations 生成", () => {
+    test("上游 #744：失败的空 patch 从原快照恢复，未实际变化则丢弃", () => {
+        const before = canvas({ nodes: [{ id: "image", type: "image", metadata: {} }] as never });
+        const after = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: "/api/resources/generated/file" } }] as never });
+        const request = { mutationId: "empty-patch", operations: [{ type: "patch_node", id: "image", patch: {}, before: {} }] } as never;
+        const repaired = repairPendingCanvasMutationRequest(request, before, after);
+        expect(repaired.mutationId).toBe("empty-patch");
+        expect(repaired.operations).toEqual([{ type: "patch_node", id: "image", patch: { "metadata.content": "/api/resources/generated/file" }, before: { "metadata.content": null } }]);
+        expect(repairPendingCanvasMutationRequest(request, before, before).operations).toEqual([]);
+    });
     test("服务端省略空会话编号时不反复提交 null 到 null", () => {
         const remote = canvas();
         delete (remote as Partial<CanvasProject>).activeChatId;

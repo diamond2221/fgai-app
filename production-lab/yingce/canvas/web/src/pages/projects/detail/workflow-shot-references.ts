@@ -24,6 +24,31 @@ export type ShotPromptAssetReference = {
     dialogue?: string;
 };
 
+/** 仅按本片段的明确名称匹配，歧义名称与没有视觉素材的设定不自动绑定。 */
+export function inferShotVisualAssets(assets: ProjectAsset[], text: string, explicitIds: string[] = []): ProjectAsset[] {
+    const normalized = text.normalize("NFKC").toLocaleLowerCase();
+    const names = new Map<string, ProjectAsset[]>();
+    for (const asset of assets) {
+        const name = asset.title.trim().normalize("NFKC").toLocaleLowerCase();
+        if (name.length < 2 || !asset.primaryVersionId || !["ready", "confirmed"].includes(asset.status) || !projectAssetReferenceImage(asset)) continue;
+        names.set(name, [...(names.get(name) || []), asset]);
+    }
+    const matched = new Map<string, ProjectAsset>();
+    for (const id of explicitIds) {
+        const asset = assets.find((item) => item.id === id);
+        if (asset) matched.set(id, asset);
+    }
+    for (const [name, candidates] of names) {
+        if (candidates.length !== 1) continue;
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const pattern = /^[a-z0-9 .'-]+$/i.test(name)
+            ? new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i")
+            : new RegExp(escaped, "i");
+        if (pattern.test(normalized)) matched.set(candidates[0].id, candidates[0]);
+    }
+    return [...matched.values()];
+}
+
 export function buildShotAssetReferenceContext(detail: ProjectDetail, shotId: string): ShotAssetReferenceContext {
     const assetByVersionId = new Map(detail.assets.filter((asset) => asset.primaryVersionId).map((asset) => [asset.primaryVersionId as string, asset]));
     const seenAssetIds = new Set<string>();

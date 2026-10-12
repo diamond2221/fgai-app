@@ -1,7 +1,7 @@
 import type { StoryboardRow } from "@/types/canvas";
 import { formatShotOrdinal } from "@/lib/shot-label";
 import type { ProjectDetail, ShotRevisionInput } from "@/services/api/projects";
-import { ensureShotAssetMentionPrompt } from "./workflow-shot-references";
+import { ensureShotAssetMentionPrompt, inferShotVisualAssets } from "./workflow-shot-references";
 import type { DramaProductionPlan } from "@/lib/short-drama-production";
 
 export type ChapterStoryboardAsset = {
@@ -87,7 +87,9 @@ export function storyboardRowsToProjectShots(rows: StoryboardRow[], detail?: Pro
         const shotNumber = index + 1;
         const description = row.plotDescription.trim() || `镜头 ${shotNumber}`;
         const durationMs = Math.max(1000, Math.round((Number(row.durationSeconds) || 1) * 1000));
-        const mentionReferences = storyboardRowAssetIds(row).flatMap((assetId) => {
+        const assetIds = detail ? inferShotVisualAssets(detail.assets, [row.plotDescription, row.videoMotionPrompt, row.imageGenerationPrompt, row.performanceBlocking, ...row.characters.map((character) => character.characterName)].join("\n"), storyboardRowAssetIds(row)).map((asset) => asset.id) : storyboardRowAssetIds(row);
+        if (assetIds.length > 6) throw new Error(`片段 ${shotNumber} 匹配到 ${assetIds.length} 项参考资产，请核对并精简到 6 项以内`);
+        const mentionReferences = assetIds.flatMap((assetId) => {
             const reference = mentionReferenceByAssetId.get(assetId);
             return reference ? [reference] : [];
         });
@@ -95,7 +97,7 @@ export function storyboardRowsToProjectShots(rows: StoryboardRow[], detail?: Pro
             title: formatShotOrdinal(index),
             description,
             durationMs,
-            assetVersionIds: storyboardRowAssetVersionIds(row, versionByAssetId),
+            assetVersionIds: assetIds.flatMap((assetId) => versionByAssetId.get(assetId) ? [versionByAssetId.get(assetId)!] : []),
             revision: {
                 plotDescription: description,
                 action: joinStoryboardAction(row),
@@ -127,13 +129,6 @@ export function chapterStoryboardReplaceImpact(detail: ProjectDetail, unitId: st
         artifactCount: detail.shotArtifacts.filter((artifact) => artifact.unitId === unitId).length,
         candidateCount: detail.assetCandidates.filter((candidate) => Boolean(candidate.shotId && shotIds.has(candidate.shotId))).length,
     };
-}
-
-function storyboardRowAssetVersionIds(row: StoryboardRow, versionByAssetId: Map<string, string>) {
-    return storyboardRowAssetIds(row).flatMap((assetId) => {
-        const versionId = versionByAssetId.get(assetId);
-        return versionId ? [versionId] : [];
-    }).slice(0, 6);
 }
 
 function storyboardRowAssetIds(row: StoryboardRow) {

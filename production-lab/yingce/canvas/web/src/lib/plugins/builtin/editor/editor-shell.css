@@ -1,3 +1,24 @@
+.editor-workbench {
+    --director-workspace-bg: var(--user-surface-raised, var(--workspace-surface-strong));
+    --director-sequencer-surface: var(--user-surface-raised, var(--workspace-surface-strong));
+    --director-sequencer-surface-raised: color-mix(in srgb, var(--director-sequencer-surface) 97%, var(--foreground));
+    --director-sequencer-border: color-mix(in srgb, var(--foreground) 16%, transparent);
+    --director-sequencer-grid: color-mix(in srgb, var(--foreground) 8%, transparent);
+    --director-sequencer-muted: color-mix(in srgb, var(--foreground) 58%, transparent);
+    --director-dock-fg: color-mix(in srgb, var(--foreground) 76%, transparent);
+    --director-dock-fg-strong: var(--foreground);
+    --director-dock-active-surface: color-mix(in srgb, var(--workspace-accent) 15%, var(--director-sequencer-surface));
+    --director-control-hover: color-mix(in srgb, var(--foreground) 8%, var(--director-sequencer-surface));
+    --director-accent: var(--workspace-accent);
+    --director-accent-hover: color-mix(in srgb, var(--workspace-accent) 85%, var(--foreground));
+    --director-on-accent: #fff;
+    --director-danger: #dc3545;
+    --director-warning: #b7791f;
+    --director-success: #16845a;
+    --director-success-soft: color-mix(in srgb, var(--director-success) 12%, var(--director-sequencer-surface));
+    color: var(--director-dock-fg-strong);
+}
+
 @layer utilities {
     /* Editor workbench scrolling and range controls belong to the editor plugin, not the app shell. */
     .director-scroll {

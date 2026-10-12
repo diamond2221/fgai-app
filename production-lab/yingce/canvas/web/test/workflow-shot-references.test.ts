@@ -2,9 +2,21 @@ import { describe, expect, test } from "bun:test";
 
 import { canvasResourceMentionToken } from "@/lib/canvas/canvas-resource-references";
 import type { ProjectAsset, ProjectDetail } from "@/services/api/projects";
-import { buildShotAssetReferenceContext, ensureShotAssetMentionPrompt, resolveShotAssetMentionPrompt } from "@/pages/projects/detail/workflow-shot-references";
+import { buildShotAssetReferenceContext, ensureShotAssetMentionPrompt, inferShotVisualAssets, resolveShotAssetMentionPrompt } from "@/pages/projects/detail/workflow-shot-references";
 
 describe("workflow shot asset references", () => {
+    test("auto matches confirmed visuals by segment names, ignoring unmentioned assets and text-only definitions", () => {
+        const assets = detail().assets;
+        assets.push({ ...assets[0], id: "text-prop", title: "旧信封", category: "prop", mediaType: "text", storageKey: undefined });
+        expect(inferShotVisualAssets(assets, "林默走进雨夜街道，拿出旧信封").map((asset) => asset.id)).toEqual(["asset-scene", "asset-character"]);
+        expect(inferShotVisualAssets(assets, "雨夜街道空景").map((asset) => asset.id)).toEqual(["asset-scene"]);
+    });
+    test("does not guess duplicate names or English name substrings", () => {
+        const scene = detail().assets[0];
+        const assets = [{ ...scene, id: "a", title: "Evan" }, { ...scene, id: "b", title: "门牌" }, { ...scene, id: "c", title: "门牌" }];
+        expect(inferShotVisualAssets(assets, "Evans 拿起门牌")).toEqual([]);
+        expect(inferShotVisualAssets(assets, "Evan: Hello.").map((asset) => asset.id)).toEqual(["a"]);
+    });
     test("builds ordered image references for bound media and characters", () => {
         const context = buildShotAssetReferenceContext(detail(), "shot-1");
 

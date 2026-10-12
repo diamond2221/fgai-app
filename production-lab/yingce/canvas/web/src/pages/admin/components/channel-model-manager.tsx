@@ -16,6 +16,7 @@ import { ChannelModelCostSummary } from "./channel-model-cost-summary";
 import { ChannelModelRepriceDialog } from "./channel-model-reprice-dialog";
 import { Select } from "@/components/ui/base/select";
 import { useUserStore } from "@/stores/use-user-store";
+import { filterImportModels, selectVisibleModels, deselectVisibleModels } from "./channel-model-import-selection";
 
 export function ChannelModelManager({ channel, onChanged }: { channel: ModelChannel; onChanged: () => void | Promise<void> }) {
     const creditsEnabled = useUserStore((state) => state.features.creditsEnabled);
@@ -31,6 +32,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
     const [fetchPreviewOpen, setFetchPreviewOpen] = useState(false);
     const [fetchPreviewModels, setFetchPreviewModels] = useState<string[]>([]);
     const [selectedFetchModels, setSelectedFetchModels] = useState<string[]>([]);
+    const [fetchKeyword, setFetchKeyword] = useState("");
     const [importing, setImporting] = useState(false);
     const [editorOpen, setEditorOpen] = useState(false);
     const [keyword, setKeyword] = useState("");
@@ -110,6 +112,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
         setFetchPreviewOpen(false);
         setFetchPreviewModels([]);
         setSelectedFetchModels([]);
+        setFetchKeyword("");
     };
 
     const importSelectedModels = async () => {
@@ -247,8 +250,10 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
     const existingFetchModelKeys = new Set(items.flatMap((item) => [item.modelKey, item.providerModelKey].filter(Boolean).map(normalizeFetchModelKey)));
     const selectedNewFetchModels = selectedFetchModels.filter((name) => !existingFetchModelKeys.has(normalizeFetchModelKey(name)));
     const selectedExistingFetchCount = selectedFetchModels.length - selectedNewFetchModels.length;
-    const allFetchModelsSelected = fetchPreviewModels.length > 0 && fetchPreviewModels.every((name) => selectedFetchModels.includes(name));
-    const fetchModelOptions = fetchPreviewModels.map((name) => {
+    const visibleFetchModels = filterImportModels(fetchPreviewModels, fetchKeyword);
+    const selectedVisibleCount = visibleFetchModels.filter((name) => selectedFetchModels.includes(name)).length;
+    const allFetchModelsSelected = visibleFetchModels.length > 0 && selectedVisibleCount === visibleFetchModels.length;
+    const fetchModelOptions = visibleFetchModels.map((name) => {
         const alreadyExists = existingFetchModelKeys.has(normalizeFetchModelKey(name));
         return {
             label: alreadyExists ? (
@@ -454,16 +459,17 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
             >
                 <div className="space-y-3">
                     <p className="m-0 text-sm text-foreground/65">上游共返回 {fetchPreviewModels.length} 个模型。默认已全选，可批量全选或取消全选；已存在的模型不会重复导入。</p>
+                    <Input allowClear autoFocus prefix={<Search className="size-4" />} value={fetchKeyword} onChange={(event) => setFetchKeyword(event.target.value)} disabled={importing} placeholder="搜索上游模型标识" aria-label="搜索上游模型" />
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 bg-muted/25 px-3 py-2">
                         <span className="text-sm font-medium text-foreground/70" aria-live="polite">
                             已选择 {selectedFetchModels.length} / {fetchPreviewModels.length} 个模型
                         </span>
                         <Space size={4}>
-                            <Button size="small" disabled={importing || allFetchModelsSelected} onClick={() => setSelectedFetchModels(fetchPreviewModels)}>
-                                全选
+                            <Button size="small" disabled={importing || !visibleFetchModels.length || allFetchModelsSelected} onClick={() => setSelectedFetchModels((current) => selectVisibleModels(current, visibleFetchModels))}>
+                                全选当前结果
                             </Button>
-                            <Button size="small" disabled={importing || selectedFetchModels.length === 0} onClick={() => setSelectedFetchModels([])}>
-                                取消全选
+                            <Button size="small" disabled={importing || selectedVisibleCount === 0} onClick={() => setSelectedFetchModels((current) => deselectVisibleModels(current, visibleFetchModels))}>
+                                取消当前结果
                             </Button>
                         </Space>
                     </div>
@@ -473,8 +479,9 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                             value={selectedFetchModels}
                             options={fetchModelOptions}
                             disabled={importing}
-                            onChange={(values) => setSelectedFetchModels(values as string[])}
+                            onChange={(values) => setSelectedFetchModels((current) => selectVisibleModels(deselectVisibleModels(current, visibleFetchModels), values as string[]))}
                         />
+                        {!visibleFetchModels.length && <p className="py-4 text-center text-sm text-foreground/50">没有匹配的模型</p>}
                     </div>
                     <div className="text-xs text-foreground/50">
                         {selectedNewFetchModels.length > 0 ? `将导入 ${selectedNewFetchModels.length} 个新模型` : "当前勾选的模型均已存在"}
