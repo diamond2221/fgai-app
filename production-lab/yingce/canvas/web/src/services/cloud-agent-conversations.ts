@@ -51,6 +51,21 @@ export type CloudAgentPendingSubmission = CloudAgentMessagePresentation & {
 };
 
 const CLOUD_AGENT_CONVERSATIONS_KEY = "cloud-agent-conversations-v1";
+const historyWrites = new Map<string, Promise<void>>();
+const deletedConversationIds = new Map<string, Set<string>>();
+
+export async function deleteCloudAgentConversation(canvasId: string, id: string, activeId: string | null, conversations: CloudAgentConversation[]) {
+    const key = `${getActiveUserScope()}:${storageKey(canvasId)}`;
+    const removed = deletedConversationIds.get(key) || new Set<string>();
+    deletedConversationIds.set(key, removed);
+    removed.add(id);
+    try {
+        await saveCloudAgentConversations(canvasId, activeId === id ? null : activeId, conversations.filter((item) => item.id !== id));
+    } catch (error) {
+        removed.delete(id);
+        throw error;
+    }
+}
 
 export async function loadCloudAgentConversations(canvasId: string): Promise<CloudAgentConversationDocument> {
     if (!canvasId) throw new Error("缺少画布 ID，无法读取 Agent 对话");
@@ -69,14 +84,21 @@ export async function loadCloudAgentConversations(canvasId: string): Promise<Clo
 
 export async function saveCloudAgentConversations(canvasId: string, activeId: string | null, conversations: CloudAgentConversation[]) {
     if (!canvasId) throw new Error("缺少画布 ID，无法保存 Agent 对话");
+    const scope = getActiveUserScope();
+    const key = `${scope}:${storageKey(canvasId)}`;
     // 流式标记只属于内存中的观察状态。若网络在最后一个 delta 后断开，
     // 也不能让下次恢复把思考卡片误判为仍在实时展开。
     const persistedConversations = conversations.map((conversation) => ({
         ...conversation,
         messages: conversation.messages.map((message) => ({ ...message, streaming: false })),
     }));
-    const document: CloudAgentConversationDocument = { version: 1, activeId, conversations: persistedConversations };
-    await localForageStorageForScope(getActiveUserScope()).setItem(storageKey(canvasId), JSON.stringify(document));
+    const write = (historyWrites.get(key) || Promise.resolve()).catch(() => {}).then(async () => {
+        const removed = deletedConversationIds.get(key);
+        const document: CloudAgentConversationDocument = { version: 1, activeId: activeId && removed?.has(activeId) ? null : activeId, conversations: persistedConversations.filter((item) => !removed?.has(item.id)) };
+        await localForageStorageForScope(scope).setItem(storageKey(canvasId), JSON.stringify(document));
+    });
+    historyWrites.set(key, write);
+    try { await write; } finally { if (historyWrites.get(key) === write) historyWrites.delete(key); }
 }
 
 // Keep the retry key outside the chat snapshot. If the response is lost, a

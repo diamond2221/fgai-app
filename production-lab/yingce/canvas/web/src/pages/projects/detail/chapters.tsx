@@ -57,7 +57,9 @@ import { FGPricePreview } from "@/components/fg-price-preview";
 import { createDramaProductionPlan, dramaSegmentDurations, type DramaProductionPlan } from "@/lib/short-drama-production";
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
-import { decodeNovelText, splitTextIntoChapters } from "@/lib/canvas/canvas-document";
+import { splitTextIntoChapters } from "@/lib/canvas/canvas-document";
+import { scriptTextToHtml } from "@/lib/script-document";
+import { readScriptDocument, SCRIPT_DOCUMENT_ACCEPT } from "@/services/script-document-import";
 import { navigateToSettings } from "@/lib/settings-navigation";
 import {
     createProjectAssetCandidates,
@@ -96,6 +98,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
     const [selectedId, setSelectedId] = useState(initialSelectedId);
     const [createOpen, setCreateOpen] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
+    const [formatPreview, setFormatPreview] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [moveTargetId, setMoveTargetId] = useState("");
     const [movePosition, setMovePosition] = useState<number | null>(null);
@@ -283,12 +286,22 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
             Placeholder.configure({ placeholder: "从这一章开始写下故事……" }),
         ],
         content: selectedUnit?.sourceText || "",
-        editorProps: { attributes: { class: "project-chapter-editor focus:outline-none" } },
+        editorProps: {
+            attributes: { class: "project-chapter-editor focus:outline-none" },
+            handlePaste: (_view, event) => {
+                const text = event.clipboardData?.getData("text/plain");
+                if (!text || !/[\n\t]/.test(text)) return false;
+                event.preventDefault();
+                editor?.commands.insertContent(scriptTextToHtml(text));
+                return true;
+            },
+        },
         onUpdate: ({ editor: nextEditor }) => { setDraftHtml(nextEditor.getHTML()); setDirty(true); },
     });
 
     useEffect(() => {
         if (!selectedUnitSummary) return;
+        setFormatPreview(null);
         setDraftTitle(selectedUnitSummary.title);
         setDraftHtml("");
         setDirty(false);
@@ -618,7 +631,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                                 <Button size="small" type={dirty ? "primary" : "default"} icon={dirty ? <Save className="size-3.5" /> : <Check className="size-3.5" />} disabled={!selectedUnit || !dirty || !draftTitle.trim() || saveMutation.isPending} loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>{dirty ? "保存" : "已保存"}</Button>
                             </div>
                         </header>
-                        <EditorToolbar editor={editor} />
+                        <div className="flex min-w-0 items-center border-b border-border/70"><div className="min-w-0 flex-1"><EditorToolbar editor={editor} /></div><Button type="text" size="small" className="mr-2 shrink-0" disabled={!editor} onClick={() => setFormatPreview(scriptTextToHtml(editor?.getText({ blockSeparator: "\n" }) || ""))}>整理排版</Button></div>
                         <div className="project-chapter-editor-scroll thin-scrollbar min-h-0 flex-1 overflow-y-auto bg-foreground/[.012]">
                             <div className="project-chapter-editor-wrap min-h-full"><EditorContent editor={editor} /></div>
                         </div>
@@ -627,6 +640,10 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
             </section>
             <CreateChapterModal open={createOpen} onClose={() => setCreateOpen(false)} loading={createMutation.isPending} onSubmit={(values) => createMutation.mutate(values)} />
             <ImportNovelModal open={importOpen} loading={importMutation.isPending} onClose={() => setImportOpen(false)} onImport={(chapters) => importMutation.mutate(chapters)} />
+            <AppModal centered title="剧本排版预览" open={formatPreview !== null} width={960} onCancel={() => setFormatPreview(null)} onOk={() => { if (formatPreview !== null) editor?.commands.setContent(formatPreview); setFormatPreview(null); }} okText="应用排版" cancelText="保留原排版">
+                <p className="text-xs text-foreground/55">保留正文、台词和顺序，统一章节、镜头与对白的显示。应用后可撤销，保存章节后才会写入云端。</p>
+                <div className="project-chapter-editor thin-scrollbar max-h-[60dvh] overflow-y-auto rounded-lg border border-border p-5" dangerouslySetInnerHTML={{ __html: formatPreview || "" }} />
+            </AppModal>
             <Modal className="library-modal" title="提取章节角色、场景与道具" open={characterExtractOpen} width={500} okText="开始提取" cancelText="取消" okButtonProps={{ disabled: !selectedTextModel }} onCancel={() => setCharacterExtractOpen(false)} onOk={() => void extractCharacters()} styles={{ body: { paddingTop: 12 } }}>
                 <div className="grid gap-4">
                     <div className="rounded-lg border border-border/70 bg-foreground/[.018] px-3 py-2.5">
@@ -766,35 +783,46 @@ function CreateChapterModal({ open, onClose, loading, onSubmit }: { open: boolea
 }
 
 function ImportNovelModal({ open, loading, onClose, onImport }: { open: boolean; loading: boolean; onClose: () => void; onImport: (chapters: Array<{ title: string; plainText: string }>) => void }) {
+    const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const readEpoch = useRef(0);
     const [text, setText] = useState("");
     const [fileName, setFileName] = useState("");
+    const [reading, setReading] = useState(false);
+    const [preview, setPreview] = useState(false);
     const deferredText = useDeferredValue(text);
     const chapters = useMemo(() => deferredText.trim() ? splitTextIntoChapters(deferredText).map((chapter) => ({ title: chapter.title, plainText: chapter.plainText })) : [], [deferredText]);
-    useEffect(() => { if (!open) { setText(""); setFileName(""); } }, [open]);
+    useEffect(() => { if (!open) { readEpoch.current++; setText(""); setFileName(""); setReading(false); setPreview(false); } }, [open]);
     const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         event.target.value = "";
         if (!file) return;
-        setFileName(file.name);
-        setText(decodeNovelText(await file.arrayBuffer()));
+        const epoch = ++readEpoch.current;
+        setReading(true);
+        try {
+            const value = await readScriptDocument(file);
+            if (readEpoch.current !== epoch) return;
+            setFileName(file.name); setText(value); setPreview(true);
+        } catch (error) {
+            if (readEpoch.current === epoch) message.error(error instanceof Error ? error.message : "文件读取失败，原文已保留");
+        } finally { if (readEpoch.current === epoch) setReading(false); }
     };
     return (
-        <AppModal flush title={null} open={open} footer={null} onCancel={onClose} width={760}>
-            <div className="flex min-h-[478px] flex-col">
-                <header className="flex h-12 shrink-0 items-center border-b border-border px-4"><div><h2 className="text-sm font-semibold">导入小说</h2><p className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">自动识别章节标题，确认后追加到当前项目</p></div></header>
-                <div className="grid min-h-[430px] flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_240px]">
-                <div className="border-b border-border p-3 md:border-b-0 md:border-r">
-                    <div className="mb-2 flex items-center justify-between gap-2"><div><div className="text-sm font-medium">小说正文</div><div className="mt-0.5 text-[var(--fs-label)] text-foreground/45">识别章节标题后追加到现有章节</div></div><Button size="small" icon={<FileUp className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>{fileName || "选择 TXT"}</Button></div>
-                    <input ref={fileInputRef} type="file" accept=".txt,.md,text/plain,text/markdown" className="hidden" onChange={(event) => void readFile(event)} />
-                    <Input.TextArea value={text} onChange={(event) => setText(event.target.value)} rows={16} placeholder={'也可以直接粘贴小说正文，例如：\n\n第一章 雨夜来信\n正文……\n\n第二章 灯塔以北\n正文……'} className="!resize-none" />
+        <AppModal flush centered title={null} open={open} footer={null} onCancel={onClose} width={1080}>
+            <div className="flex h-[min(760px,calc(100dvh-48px))] min-h-0 flex-col">
+                <header className="shrink-0 border-b border-border px-5 py-4 pr-14"><h2 className="!m-0 text-base font-semibold">导入剧本 / 小说</h2><p className="!mb-0 mt-1 text-xs text-foreground/55">支持 Word、Excel、PDF、TXT 或直接粘贴。仅整理排版，确认后追加到当前项目。</p></header>
+                <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_180px] md:grid-cols-[minmax(0,1fr)_300px] md:grid-rows-1">
+                <div className="flex min-h-0 flex-col border-b border-border p-4 md:border-b-0 md:border-r">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><Segmented size="small" value={preview ? "排版预览" : "编辑原文"} options={["编辑原文", "排版预览"]} onChange={(value) => setPreview(value === "排版预览")} /><Button size="small" loading={reading} className="max-w-full" icon={<FileUp className="size-3.5" />} onClick={() => fileInputRef.current?.click()}><span className="block max-w-60 truncate">{fileName || "选择剧本文件"}</span></Button></div>
+                    <input ref={fileInputRef} type="file" accept={SCRIPT_DOCUMENT_ACCEPT} className="hidden" onChange={(event) => void readFile(event)} />
+                    {preview ? <div className="project-chapter-editor thin-scrollbar min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-background p-4" dangerouslySetInnerHTML={{ __html: scriptTextToHtml(deferredText) }} /> : <Input.TextArea aria-label="导入剧本原文" value={text} onChange={(event) => { readEpoch.current++; setReading(false); setText(event.target.value); }} placeholder={'粘贴剧本、小说或 Excel 表格：\n\n第一章 雨夜来信\n01-01 EXT. 雨夜街道\nEVAN: Ignore them.\n\n第二章 灯塔以北\n正文……'} className="!min-h-0 !flex-1 !resize-none" />}
                 </div>
                 <div className="flex min-h-0 flex-col">
                     <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3 text-xs"><span className="font-medium">拆分预览</span><span className="tabular-nums text-foreground/45">{chapters.length} 章</span></div>
                     <ImportChapterPreview chapters={chapters} />
-                    <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border p-3"><span className={`text-[var(--fs-tiny)] ${chapters.length > MAX_NOVEL_IMPORT_CHAPTERS ? "text-red-500" : "text-foreground/38"}`}>{chapters.length > MAX_NOVEL_IMPORT_CHAPTERS ? `最多一次导入 ${MAX_NOVEL_IMPORT_CHAPTERS.toLocaleString("zh-CN")} 章` : `支持最多 ${MAX_NOVEL_IMPORT_CHAPTERS.toLocaleString("zh-CN")} 章`}</span><div className="flex gap-2"><Button size="small" onClick={onClose}>取消</Button><Button size="small" type="primary" disabled={!chapters.length || chapters.length > MAX_NOVEL_IMPORT_CHAPTERS} loading={loading} onClick={() => onImport(chapters)}>导入 {chapters.length || ""} 章</Button></div></div>
                 </div>
                 </div>
+                <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3"><span className="text-xs text-foreground/50">{chapters.length > MAX_NOVEL_IMPORT_CHAPTERS ? `最多一次导入 ${MAX_NOVEL_IMPORT_CHAPTERS} 章` : "导入前可编辑原文并核对排版；原章节不会被替换。"}</span><div className="flex gap-2"><Button onClick={onClose}>取消</Button><Button type="primary" disabled={reading || !chapters.length || deferredText !== text || chapters.length > MAX_NOVEL_IMPORT_CHAPTERS} loading={loading} onClick={() => onImport(chapters)}>导入 {chapters.length || ""} 章</Button></div></footer>
             </div>
         </AppModal>
     );
@@ -815,14 +843,13 @@ function ImportChapterPreview({ chapters }: { chapters: Array<{ title: string; p
                     const chapter = chapters[virtualItem.index];
                     return <div key={`${chapter.title}-${virtualItem.index}`} className="absolute left-0 top-0 flex w-full gap-2 border-b border-border/60 px-1.5 py-2" style={{ height: virtualItem.size, transform: `translateY(${virtualItem.start}px)` }}><span className="w-8 shrink-0 pt-0.5 text-[var(--fs-tiny)] tabular-nums text-foreground/35">{String(virtualItem.index + 1).padStart(Math.max(2, String(chapters.length).length), "0")}</span><div className="min-w-0"><div className="truncate text-xs font-medium">{chapter.title}</div><div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/40">{formatCount(chapter.plainText.length)} 字</div></div></div>;
                 })}
-            </div> : <div className="grid h-full place-items-center px-4 text-center text-xs leading-5 text-foreground/40">选择 TXT 文件或粘贴正文后，这里会显示拆分结果</div>}
+            </div> : <div className="grid h-full place-items-center px-4 text-center text-xs leading-5 text-foreground/40">选择剧本文件或粘贴正文后，这里会显示章节拆分结果</div>}
         </div>
     );
 }
 
 function plainTextToHtml(value: string) {
-    const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return escaped.split(/\n{2,}/).map((paragraph) => `<p>${paragraph.replace(/\n/g, "<br>")}</p>`).join("");
+    return scriptTextToHtml(value);
 }
 
 function stripHtml(value: string) {

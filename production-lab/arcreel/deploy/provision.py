@@ -20,6 +20,7 @@ for line in (ROOT/'.env').read_text().splitlines():
         key,value=line.split('=',1);env[key]=value
 nas=pathlib.Path(env['NAS_MEDIA_PATH'])
 from provision_storage import prepare_runtime_storage
+from provision_state import runtime_needs_preparation
 
 def run(*args,optional=False):
     try: result=subprocess.run([D,*args],capture_output=True,text=True,timeout=45)
@@ -34,7 +35,12 @@ metrics=ROOT/'host-metrics'
 try:endpoints=json.loads((metrics/'arcreel-runtimes.json').read_text())
 except FileNotFoundError:endpoints={}
 if '--requested-only' in sys.argv:
-    users=[user for user in users if user not in endpoints]
+    requested=[]
+    for user in users:
+        current=run('inspect','fg-arcreel-'+user.replace('-',''),optional=True) if user in endpoints else None
+        if user not in endpoints or runtime_needs_preparation(json.loads(current)[0] if current else None):
+            requested.append(user)
+    users=requested
 if not users:raise SystemExit(0)
 prepare_runtime_storage(nas, 'arcreel', users)
 image=env.get('ARCREEL_RUNTIME_IMAGE','fg-six-arcreel:v130')
@@ -77,16 +83,21 @@ for actor in users:
     subnet=ipaddress.ip_network(json.loads(run('network','inspect',network))[0]['IPAM']['Config'][0]['Subnet'])
     assert subnet.subnet_of(ipaddress.ip_network('10.208.0.0/12'))
     address=str(subnet.network_address+2);gateway_ip=str(subnet.network_address+3)
+    # entry.py reads the company model catalog at process startup. Attach its
+    # gateway first, otherwise a cold user's initial request can fail before DNS
+    # / routing exists, leaving a stopped container behind a published address.
+    if network not in attached:
+        run('network','connect','--alias','fg-gateway','--ip',gateway_ip,network,gateway)
+        attached[network]={}
     existing=run('inspect',name,optional=True)
     if existing:
         state=json.loads(existing)[0]
         rebound=run('exec',name,'/app/.venv/bin/python','-c',"from pathlib import Path;p=Path('/workspace/.fg-arcreel-probe');p.write_text('FG storage check');assert p.read_text()=='FG storage check'",optional=True) is not None
-        if state['Image']!=image_id or not state['State']['Running'] or not rebound:
+        if runtime_needs_preparation(state,image_id) or not rebound:
             if state['State']['Running'] and not idle(name,actor):continue
             run('rm','-f',name);existing=None
     if not existing:
         run('run','-d','--name',name,'--user','1000:1000','--restart','unless-stopped','--network',network,'--ip',address,'--add-host','fg-gateway:'+gateway_ip,'--memory','1024m','--cpus','1','--pids-limit','256','--cap-drop','ALL','--security-opt','no-new-privileges','--mount','type=volume,source='+name+'-state,target=/state','--mount','type=bind,source='+str(directory)+',target=/workspace','--mount','type=bind,source='+str(recycle)+',target=/fg-recycle','-e','FG_ARC_ACTOR='+actor,'-e','FG_ARC_CAPABILITY='+capability,image)
-    if network not in attached:run('network','connect','--alias','fg-gateway','--ip',gateway_ip,network,gateway)
     endpoints[actor]=address
     temporary=metrics/'arcreel-runtimes.new';temporary.write_text(json.dumps(endpoints));temporary.chmod(0o644);temporary.replace(metrics/'arcreel-runtimes.json')
     # Snapshot the private SQLite DB without exposing scoped capabilities on NAS.

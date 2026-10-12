@@ -35,6 +35,7 @@ import type { AgentMediaSettings } from "@/services/api/agent";
 import { addSkill, listAddedSkills, listSkillLibraryCategories, listSkills, listSkillPresets, type Skill, type SkillCategory, type SkillLibraryCategory, type SkillPreset } from "@/services/api/skills";
 import {
     clearCloudAgentPendingSubmission,
+    deleteCloudAgentConversation,
     cloudAgentConversationTitle,
     loadCloudAgentConversations,
     loadCloudAgentPendingSubmission,
@@ -154,6 +155,7 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
     const [maxGenerationTasks, setMaxGenerationTasks] = useState("0");
     const [maxVideoSeconds, setMaxVideoSeconds] = useState("0");
     const [conversations, setConversations] = useState<CloudAgentConversation[]>([]);
+    const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
     const [activeConversationId, setActiveConversationId] = useState(() => nanoid());
     const [historyHydrated, setHistoryHydrated] = useState(false);
     const [pendingHydrated, setPendingHydrated] = useState(false);
@@ -601,7 +603,9 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
     useEffect(() => {
         if (!historyHydrated) return;
         const timer = window.setTimeout(() => {
-            void saveCloudAgentConversations(canvasId, activeConversationId, conversations);
+            void saveCloudAgentConversations(canvasId, activeConversationId, conversations).catch((cause) => {
+                console.error("对话历史保存失败", cause);
+            });
         }, 180);
         return () => window.clearTimeout(timer);
     }, [activeConversationId, canvasId, conversations, historyHydrated]);
@@ -612,6 +616,7 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
         return subscribeAgentEvents(
             run.id,
             (event) => {
+                if (currentScope.current !== conversationScope) return;
                 // Only persisted agent events participate in the replay cursor.
                 // Snapshot-derived UI events intentionally use seq=0.
                 if (event.seq > 0) {
@@ -628,6 +633,7 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
                 after: 0,
                 onConnectionChange: setConnectionStatus,
                 onError: (cause) => {
+                    if (currentScope.current !== conversationScope) return;
                     canvasSyncRef.current?.reconcile();
                     setMessages((current) => appendAgentError(current, `stream-error-${run.id}`, cause, "Agent 事件流已断开"));
                     // The observation channel failed, not the durable run. Keep
@@ -827,7 +833,7 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
         approvalRequestRef.current = approvalId;
         setApprovalSubmitting(true);
         try {
-            if (decision === "approve") await saveRemoteUserDataNow();
+            if (decision === "approve") await saveRemoteUserDataNow(canvasId);
             if (currentScope.current !== scope) return;
             await decideAgentApproval(runId, approvalId, decision, approval.reason, AbortSignal.timeout(15_000), mediaSettings);
             if (currentScope.current === scope) {
@@ -951,11 +957,41 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
                 if (currentScope.current === `${canvasId}:${conversation.id}`) setMessages((current) => appendAgentError(current, `pending-${conversation.id}`, cause, "待确认请求读取失败"));
             });
     };
-    const deleteConversation = (id: string) => {
+    const deleteConversation = async (id: string) => {
+        const conversation = conversations.find((item) => item.id === id);
+        if (!conversation || deletingConversationId) return;
         const next = conversations.filter((item) => item.id !== id);
-        setConversations(next);
-        if (id === activeConversationId) newConversation();
-        void saveCloudAgentConversations(canvasId, id === activeConversationId ? null : activeConversationId, next);
+        const scope = conversationScope;
+        setDeletingConversationId(id);
+        try {
+            if (conversation.run && ["running", "queued", "waiting_approval"].includes(conversation.run.status)) {
+                const snapshot = await getAgentRun(conversation.run.id, AbortSignal.timeout(5_000));
+                if (!["completed", "failed", "cancelled", "rejected"].includes(snapshot.run.status)) {
+                    await cancelAgentRun(conversation.run.id);
+                    const stopped = await getAgentRun(conversation.run.id, AbortSignal.timeout(5_000));
+                    if (stopped.run.cleanupPending || !["completed", "failed", "cancelled", "rejected"].includes(stopped.run.status)) throw new Error("运行尚未停止，请稍后重试删除；原对话保留供核对");
+                }
+            }
+            if (currentScope.current !== scope) return;
+            await deleteCloudAgentConversation(canvasId, id, activeConversationId, next);
+            await clearCloudAgentPendingSubmission(canvasId, id);
+            if (currentScope.current !== scope) return;
+            setConversations(next);
+            if (id === activeConversationId) {
+                // Do not immediately insert another identical "新对话" row.
+                // Invalidate late event callbacks before clearing the active snapshot.
+                const freshId = nanoid();
+                currentScope.current = `${canvasId}:${freshId}`;
+                setActiveConversationId(freshId);
+                setRun(null); setMessages([]); setApproval(null); setPrompt("");
+                pendingSubmission.current = null; approvalRequestRef.current = null;
+                setPendingHydrated(true); setBusy(false); setApprovalSubmitting(false);
+                lastSeqRef.current = 0;
+            }
+        } catch (cause) {
+            setMessages((current) => appendAgentError(current, `delete-${id}`, cause, "历史对话删除失败，原对话已保留"));
+            setView("chat");
+        } finally { setDeletingConversationId(null); }
     };
 
     return (
@@ -1036,7 +1072,7 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
                                 </motion.div>
                             ) : view === "history" ? (
                                 <motion.div key="history" className="flex min-h-0 flex-1" initial={{ opacity: 0, x: 18 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 18 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
-                                    <AgentHistory conversations={conversations} activeConversationId={activeConversationId} theme={theme} onBack={() => setView("chat")} onNew={newConversation} onOpen={openConversation} onDelete={deleteConversation} />
+                                    <AgentHistory conversations={conversations} activeConversationId={activeConversationId} theme={theme} deletingConversationId={deletingConversationId} onBack={() => setView("chat")} onNew={newConversation} onOpen={openConversation} onDelete={(id) => void deleteConversation(id)} />
                                 </motion.div>
                             ) : (
                                 <motion.div key="chat" className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>

@@ -275,6 +275,7 @@ export function AgentContextRing({ view }: { view: AgentContextUsageView }) {
 
 export function AgentHistory({
     conversations,
+    deletingConversationId,
     activeConversationId,
     theme,
     onBack,
@@ -283,6 +284,7 @@ export function AgentHistory({
     onDelete,
 }: {
     conversations: CloudAgentConversation[];
+    deletingConversationId?: string | null;
     activeConversationId: string;
     theme: CanvasTheme;
     onBack: () => void;
@@ -298,7 +300,7 @@ export function AgentHistory({
                     <div className="text-sm font-semibold">历史对话</div>
                     <div className="mt-0.5 text-[11px] opacity-40">保存在当前账号与画布下</div>
                 </div>
-                <Button type="text" shape="circle" icon={<MessageSquarePlus className="size-4" />} onClick={onNew} aria-label="新建对话" title="新建对话" />
+                <Button type="text" shape="circle" disabled={Boolean(deletingConversationId)} icon={<MessageSquarePlus className="size-4" />} onClick={onNew} aria-label="新建对话" title="新建对话" />
             </header>
             <div className="canvas-agent-history-scroll thin-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-3">
                 {conversations.length ? (
@@ -312,7 +314,7 @@ export function AgentHistory({
                                     className="canvas-agent-history-item group flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors"
                                     style={{ background: active ? theme.toolbar.itemHover : "transparent", color: theme.node.text }}
                                 >
-                                    <button type="button" className="canvas-agent-history-open flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => onOpen(conversation)} aria-current={active ? "page" : undefined}>
+                                    <button type="button" disabled={Boolean(deletingConversationId)} className="canvas-agent-history-open flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => onOpen(conversation)} aria-current={active ? "page" : undefined}>
                                         <span className="grid size-8 shrink-0 place-items-center rounded-full" style={{ background: theme.node.fill, color: theme.node.muted }}>
                                             <Clock3 className="size-3.5" />
                                         </span>
@@ -329,6 +331,8 @@ export function AgentHistory({
                                         size="small"
                                         danger
                                         className="canvas-agent-history-delete !h-7 !px-2 !text-xs !opacity-80"
+                                        loading={deletingConversationId === conversation.id}
+                                        disabled={Boolean(deletingConversationId) && deletingConversationId !== conversation.id}
                                         icon={<Trash2 className="size-3.5" />}
                                         onClick={() => onDelete(conversation.id)}
                                         aria-label={`删除对话 ${conversation.title}`}
