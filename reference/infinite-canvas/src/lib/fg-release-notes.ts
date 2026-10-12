@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.3";
+export const CURRENT_RELEASE_VERSION = "1.3.4";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,19 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月12日",
+        items: [
+            { type: "新增", content: "故事投稿支持查看完整信息、审核通过、填写驳回原因、撤回及归档，保留审核历史；通过后进入故事库，正在制作的故事先处理关联项目。" },
+            { type: "调整", content: "管理员短剧筛选明确区分本人、普通用户与共享故事项目；其他管理员的私人短剧继续隔离。" },
+            { type: "修复", content: "音频设置按所选模型校正：Seed Audio 使用提示词生成声音，豆包语音使用公司音色；Suno 音乐可从画布提交、查看任务状态并接收完成的素材。" },
+            { type: "调整", content: "按供应商官方参数核对模型规格并加强提交校验，包括 Wan3 的 2–30 秒、参考视频与输出时长总和，以及 GPT 图片尺寸和参考素材限制。尚未确认的模型保持关闭。" },
+            { type: "优化", content: "后台区分火山声音生成、语音合成与语音识别、翻译工具，补充任务结果和素材播放入口。" },
+            { type: "更新", content: "同步画布的预演与审批、图片价格、画布性能和数据库连接改进；综合工作台同步账号与素材流程、推荐模板、运行环境检查和退出处理；小说工作台更新前端依赖。" },
+            { type: "说明", content: "继续验收各工作台的 Agent、Skill、剪辑导出与归档全流程。Suno 官网验证仍由真人完成，没有可靠账单证据的失败请求继续保留待核对。" },
+        ],
+    },
+    {
+        version: "1.3.3",
         date: "2026年10月11日",
         items: [
             { type: "修复", content: "修复共享故事项目与短剧删除失败。项目先归档至 NAS recycle，保留费用和素材历史，删除后故事可重新立项。" },
