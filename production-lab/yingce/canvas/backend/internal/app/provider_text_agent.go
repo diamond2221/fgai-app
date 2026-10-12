@@ -58,6 +58,9 @@ func runAgentToolTask(ctx context.Context, input canvasGenerationInput) (map[str
 	body["model"] = input.Config.Model
 	applyTextThinking(body, input, protocol)
 	applyAgentOutputLimit(body, agentStepOutputLimit(input), protocol)
+	if protocol == "claude-api" {
+		normalizeClaudeAgentToolSchemas(body)
+	}
 	normalizeAgentToolChoice(body, input, protocol)
 	result, err := postAgentRequest(ctx, input, path, body, protocol)
 	if protocol == "chat-completion" && isAgentToolChoiceCompatibilityError(err) {
@@ -152,6 +155,9 @@ func runDeclarativeAgentTask(ctx context.Context, input canvasGenerationInput, a
 		}
 		applyTextThinking(body, input, wire)
 		applyAgentOutputLimit(body, agentStepOutputLimit(input), wire)
+		if wire == "claude-api" {
+			normalizeClaudeAgentToolSchemas(body)
+		}
 		normalizeAgentToolChoice(body, input, wire)
 		spec.Body = body
 		if input.StreamText {
@@ -250,6 +256,53 @@ func executeDeclarativeAgentWithGeminiCache(ctx context.Context, input canvasGen
 	// another CachedContent 404, the first stale-cache recovery already happened;
 	// preserve the provider error instead of recursively rebuilding forever.
 	return executeProtocolRequest(ctx, input.Config, rebuilt)
+}
+
+// Claude rejects root combinators on input_schema. Keep field schemas and
+// communicate cross-field rules in the description; original server tool
+// definitions remain unchanged and still enforce model selection and authority.
+func normalizeClaudeAgentToolSchemas(body map[string]interface{}) {
+	tools, ok := body["tools"].([]interface{})
+	if !ok {
+		return
+	}
+	normalized := make([]interface{}, 0, len(tools))
+	for _, value := range tools {
+		tool, ok := value.(map[string]interface{})
+		if !ok {
+			normalized = append(normalized, value)
+			continue
+		}
+		schema, ok := tool["input_schema"].(map[string]interface{})
+		if !ok {
+			normalized = append(normalized, value)
+			continue
+		}
+		rules := map[string]interface{}{}
+		for _, key := range []string{"oneOf", "allOf", "anyOf"} {
+			if rule, exists := schema[key]; exists {
+				rules[key] = rule
+			}
+		}
+		if len(rules) == 0 {
+			normalized = append(normalized, value)
+			continue
+		}
+		toolCopy := cloneStringAnyMap(tool)
+		schemaCopy := cloneStringAnyMap(schema)
+		for key := range rules {
+			delete(schemaCopy, key)
+		}
+		encoded, err := json.Marshal(rules)
+		if err != nil {
+			normalized = append(normalized, value)
+			continue
+		}
+		toolCopy["input_schema"] = schemaCopy
+		toolCopy["description"] = stringField(tool, "description") + "\nAdditional argument constraints, enforced by the server: " + string(encoded)
+		normalized = append(normalized, toolCopy)
+	}
+	body["tools"] = normalized
 }
 
 func claudeAgentBody(request map[string]interface{}) map[string]interface{} {
