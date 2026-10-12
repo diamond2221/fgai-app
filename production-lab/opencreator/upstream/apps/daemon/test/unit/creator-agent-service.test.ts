@@ -304,7 +304,7 @@ describe('creator agent service', () => {
     fixture.db.close();
   });
 
-  it('auto-approves read-only Creator tools without creating an approval gate', async () => {
+  it.each(['creator_get_context', 'creator_list_company_skills', 'creator_read_company_skill'])('auto-approves read-only Creator tool %s without creating an approval gate', async toolName => {
     let observedDecision: AppServerApprovalDecision | undefined;
     const runtime: AgentRuntimeAdapter = {
       id: 'fake-read-only-tool',
@@ -316,7 +316,7 @@ describe('creator agent service', () => {
           method: 'mcpServer/elicitation/request',
           params: {
             serverName: 'opencreator_tools',
-            message: 'Allow the opencreator_tools MCP server to run tool "creator_get_context"?',
+            message: `Allow the opencreator_tools MCP server to run tool "${toolName}"?`,
             _meta: { codex_approval_kind: 'mcp_tool_call' }
           }
         });

@@ -775,7 +775,7 @@ function isAutoApprovedCreatorReadRequest(request: AppServerRequest): boolean {
   if (!isCreatorToolRequest(request)) return false;
   const params = request.params;
   const message = typeof params.message === 'string' ? params.message : '';
-  return /\"creator_(?:get_(?:context|artifact)|wait_for_stage)\"/.test(message);
+  return /\"creator_(?:get_(?:context|artifact)|wait_for_stage|list_company_skills|read_company_skill)\"/.test(message);
 }
 
 function isCreatorToolRequest(request: AppServerRequest): boolean {
