@@ -15,6 +15,14 @@ test("script layout preserves order, dialogue and escapes imported markup", () =
     expect(html).toContain('Shadow: Already did.');
 });
 
+test('old flattened spreadsheet paste separates scene rows without dropping durations or dialogue', () => {
+    const source='第1集｜影子知道序号 场景描述 画面内容 台词 时长（秒）01-01 EXT. 街道 EVAN: Ignore them. 401-02 INT. 书房 SHADOW: Already did. 3';
+    const html=scriptTextToHtml(source);
+    expect(html).toContain('<h3>01-01 EXT. 街道 EVAN: Ignore them. 4</h3>');
+    expect(html).toContain('<h3>01-02 INT. 书房 SHADOW: Already did. 3</h3>');
+    expect(html.replace(/<[^>]+>/g,'').replace(/\s/g,'')).toBe(source.replace(/\s/g,''));
+});
+
 for (const bookType of ['xlsx', 'biff8'] as const) {
     test(`reads actual ${bookType} spreadsheets preserving columns and multiline dialogue`, async () => {
         const book = xlsx.utils.book_new();
