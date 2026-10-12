@@ -5,12 +5,11 @@ import pg from 'pg';
 import {isDeepStrictEqual} from 'node:util';
 import {capabilities} from './fg-model-capabilities.mjs';
 import {withNativeAdmin} from './native-admin.mjs';
+import {profileMatches} from './fg-model-profile-normalization.mjs';
 
 const keys=JSON.parse(await fs.readFile(new URL('./model-specs.json',import.meta.url),'utf8')).filter(s=>s.id!=='gemini-3.5-pro').map(s=>s.id);
 // Saving a capability increments priceVersion/updatedAt even with unchanged rates.
 const priceContract=tiers=>(tiers||[]).map(t=>Object.fromEntries(['resolution','videoSeconds','providerModelKey','billingMode','unitPriceMicrocredits','inputTokenPriceMicrocredits','outputTokenPriceMicrocredits','cachedTokenPriceMicrocredits','priceConfigured','enabled','costPricing'].map(k=>[k,t[k]])));
-// Native normalization adds optional defaults; do not rewrite an already matching profile.
-const profileMatches=(expected,value)=>Object.entries(expected).every(([key,want])=>want&&typeof want==='object'&&!Array.isArray(want)?profileMatches(want,value?.[key]):isDeepStrictEqual(want,value?.[key]));
 const specs=JSON.parse(await fs.readFile(new URL('./model-specs.json',import.meta.url),'utf8'));
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:2});
 try{
