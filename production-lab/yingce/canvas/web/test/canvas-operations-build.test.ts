@@ -22,6 +22,32 @@ function canvas(patch: Partial<CanvasProject> = {}): CanvasProject {
 }
 
 describe("画布 operations 生成", () => {
+    test("服务端省略空会话编号时不反复提交 null 到 null", () => {
+        const remote = canvas();
+        delete (remote as Partial<CanvasProject>).activeChatId;
+        expect(buildCanvasOperations(remote, canvas({ activeChatId: null }))).toEqual([]);
+        expect(buildCanvasOperations(canvas({ activeChatId: null }), remote)).toEqual([]);
+    });
+    test("节点缺省媒体和 null 不产生操作，但新增媒体和清空媒体保留", () => {
+        const missing = canvas({ nodes: [{ id: "image", type: "image", metadata: {} }] as never });
+        const empty = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: null } }] as never });
+        const filled = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: "/api/resources/generated/file" } }] as never });
+        expect(buildCanvasOperations(missing, empty)).toEqual([]);
+        expect(buildCanvasOperations(empty, missing)).toEqual([]);
+        expect(buildCanvasOperations(filled, missing)).toEqual([{ type: "patch_node", id: "image", patch: { "metadata.content": null }, before: { "metadata.content": "/api/resources/generated/file" } }]);
+        expect(buildCanvasOperations(missing, filled)).toHaveLength(1);
+    });
+    test("清空已选会话仍然提交，不能当作空字段忽略", () => {
+        expect(buildCanvasOperations(canvas({ activeChatId: "chat-1" }), canvas())).toEqual([{ type: "set_field", field: "activeChatId", beforeValue: "chat-1", value: null }]);
+    });
+    test("旧 journal 丢弃整笔空操作，混合编辑保留原请求用于幂等重放", () => {
+        const request = { mutationId: "empty-chat", operations: [
+            { type: "set_field", field: "activeChatId", beforeValue: null, value: null },
+            { type: "set_field", field: "title", beforeValue: "旧标题", value: "新标题" },
+        ] } as never;
+        expect(repairPendingCanvasMutationRequest(request, canvas(), canvas())).toBe(request);
+        expect(repairPendingCanvasMutationRequest({ mutationId: "noop", operations: [{ type: "set_field", field: "activeChatId", beforeValue: null, value: null }] }, canvas(), canvas()).operations).toEqual([]);
+    });
     test("生图节点的 undefined 基线在 JSON 传输后保留为 null", () => {
         const before = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: undefined, storageKey: undefined } }] as never });
         const after = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: "/api/resources/generated/file", storageKey: "resource:generated" } }] as never });

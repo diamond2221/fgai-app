@@ -78,6 +78,10 @@ async function loadPendingCanvasMutationJournal(scope = getActiveUserScope()) {
             if (!(entry?.projectId && entry.request?.mutationId && Array.isArray(entry.request.operations))) continue;
             const request = repairPendingCanvasMutationRequest(entry.request, entry.baseline, entry.prepared);
             repaired ||= request !== entry.request;
+            if (!request.operations.length) {
+                repaired = true;
+                continue;
+            }
             pendingCanvasMutations.set(entry.projectId, request === entry.request ? entry : { ...entry, request });
         }
         if (repaired) await persistPendingCanvasMutationJournal();
@@ -136,6 +140,10 @@ export function repairPendingCanvasMutationRequest(request: CanvasOperationsRequ
             beforeValue: hasBefore ? operation.beforeValue : canvasOperationValue(baseline?.[operation.field]),
         };
     });
+    // 整笔没有实际编辑的旧请求可以丢弃；混合请求保留原操作，避免改变已提交请求的幂等摘要。
+    if (operations.length && operations.every((operation) => operation.type === "set_field" && canvasOperationValueEqual(operation.beforeValue, operation.value))) {
+        return { ...request, operations: [] };
+    }
     return changed ? { ...request, operations } : request;
 }
 
@@ -881,7 +889,8 @@ export async function saveRemoteUserDataNow(input?: string | readonly string[]) 
 }
 
 function canvasOperationValueEqual(left: unknown, right: unknown) {
-    return canonicalize(left) === canonicalize(right);
+    // JSON 操作把缺省值编码为 null，比较时也必须使用同一语义，避免空字段无限保存。
+    return canonicalize(canvasOperationValue(left)) === canonicalize(canvasOperationValue(right));
 }
 
 function diffCanvasObject(before: Record<string, unknown>, after: Record<string, unknown>, prefix = "") {
@@ -900,7 +909,7 @@ function diffCanvasObject(before: Record<string, unknown>, after: Record<string,
             Object.assign(previous, nested.previous);
             continue;
         }
-        if (hasBefore && hasAfter && canvasOperationValueEqual(oldValue, newValue)) continue;
+        if (canvasOperationValueEqual(oldValue, newValue)) continue;
         previous[path] = canvasOperationValue(oldValue);
         patch[path] = canvasOperationValue(newValue);
     }
@@ -1156,6 +1165,10 @@ async function saveRemoteUserDataBatch(uploaded: Map<string, string>, options: {
                 if (!operations.length) {
                     acknowledgedProjects.set(source.id, { ...prepared, revision: current.revision, remoteContentHash: await canvasContentHash(prepared) });
                     verifiedProjects.add(source.id);
+                    useSyncProgressStore.getState().setProjectProgress(source.id, {
+                        phase: "done", cloudRevision: Number(current.revision), pendingChanges: 0,
+                        errorKind: undefined, message: "已保存到云端",
+                    });
                     continue;
                 }
                 const request: CanvasOperationsRequest = {

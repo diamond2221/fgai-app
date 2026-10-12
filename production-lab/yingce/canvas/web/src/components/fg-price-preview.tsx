@@ -4,6 +4,12 @@ import {http} from '@/services/api/request';
 import {modelOptionName,resolveModelChannel,type AiConfig,type ModelCapability} from '@/stores/use-config-store';
 import {modelRequestOptions,resolveVideoOperationForModel,type ModelRequirements} from '@/lib/model-selection';
 type Quote={model:string;estimatedCny:number|null;estimateKind?:'estimate'|'partial'|'lower_bound';discount:number|null;fx:number;lines:string[];notes:string[];collectedAt:string};
+export function fgQuotePriceLabel(quote: Pick<Quote,'estimatedCny'|'estimateKind'|'lines'>, mode?:ModelCapability){
+ const amount=quote.estimatedCny;
+ if(amount!==null&&amount!==undefined)return `${quote.estimateKind==='lower_bound'?'≥':'≈'}¥${amount.toLocaleString('zh-CN',{maximumFractionDigits:4})}${quote.estimateKind==='partial'?'起':''}`;
+ const rates=quote.lines.filter(line=>/百万\s*Tokens?/i.test(line)).flatMap(line=>[...line.matchAll(/¥([\d,.]+)/g)].map(m=>Number(m[1].replaceAll(',','')))).filter(Number.isFinite);
+ return (mode==='text'||mode==='image')&&rates.length?`¥${Math.min(...rates).toLocaleString('zh-CN',{maximumFractionDigits:4})}–${Math.max(...rates).toLocaleString('zh-CN',{maximumFractionDigits:4})}/百万Token`:'按用量';
+}
 export function FGPricePreview({config,model,mode,requirements}:{config:AiConfig;model:string;mode?:ModelCapability;requirements?:ModelRequirements}){
  const channel=resolveModelChannel(config,model),input=requirements?.input;
  const enabled=channel.scope==='system'&&['text','image','video'].includes(mode||'');
@@ -20,9 +26,6 @@ export function FGPricePreview({config,model,mode,requirements}:{config:AiConfig
  },[key]);
  if(!enabled)return null;
  const quote=state.key===key?state.quote:undefined;
- const amount=quote?.estimatedCny;
- const rates=quote?.lines.flatMap(line=>[...line.matchAll(/¥([\d,.]+)/g)].slice(0,2).map(m=>Number(m[1].replaceAll(',',''))))||[];
- const rate=mode==='text'&&rates.length?`¥${Math.min(...rates).toLocaleString('zh-CN',{maximumFractionDigits:4})}–${Math.max(...rates).toLocaleString('zh-CN',{maximumFractionDigits:4})}/百万Token`:null;
- const label=quote?(amount!==null&&amount!==undefined?`${quote.estimateKind==='lower_bound'?'≥':'≈'}¥${amount.toLocaleString('zh-CN',{maximumFractionDigits:4})}${quote.estimateKind==='partial'?'起':''}`:rate||'按用量'):state.key===key&&state.error?'价格待确认':'…';
- return <span role="status" aria-label={`人民币价格 ${label}`} className="fg-price-chip nodrag nopan">{label}</span>;
+ const label=quote?fgQuotePriceLabel(quote,mode):state.key===key&&state.error?'价格待确认':'…';
+ return <span role="status" aria-label={`人民币价格 ${label}`} title={quote?[...quote.lines,...quote.notes].join('\n'):undefined} className="fg-price-chip nodrag nopan">{label}</span>;
 }
