@@ -179,7 +179,7 @@ export async function creatorInternalRoute(req,res,{pool,web,publicOrigin,canvas
    if(payload.stream){for(const event of anthropicStreamEvents(result))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();}else json(res,result);return true;
   }
   if(match[2]==='chat/completions'){json(res,{id:'chatcmpl-'+job.id,object:'chat.completion',model,choices:[{index:0,message:{role:'assistant',content:nativeResult.text||null,...(nativeResult.toolCalls?.length?{tool_calls:nativeResult.toolCalls}:{})},finish_reason:nativeResult.toolCalls?.length?'tool_calls':'stop'}]});return true;}
-  const result=creatorResponse(nativeResult,{id:'resp_'+job.id,model,custom:conversation.custom});
+  const result=creatorResponse(nativeResult,{id:'resp_'+job.id,model,custom:conversation.custom,toolNames:conversation.toolNames});
   if(payload.stream){for(const event of creatorStreamEvents(result))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();}else json(res,result);
  }catch(e){if(!res.headersSent)json(res,{error:{message:e.message,type:'fg_creator_error'}},400);else if(!res.destroyed){res.write('event: error\ndata: '+JSON.stringify({type:'error',error:{message:e.message,code:'fg_creator_error'}})+'\n\n');res.end();}}
  finally{if(keepAlive)clearInterval(keepAlive);}return true;
