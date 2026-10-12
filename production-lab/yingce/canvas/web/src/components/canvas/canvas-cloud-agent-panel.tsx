@@ -537,25 +537,9 @@ export function CanvasCloudAgentPanel({ canvasId, domainProjectId, nodeCount, se
                     if (pending?.request) setPrompt(pending.displayText || pending.request.prompt);
                 } else {
                     const initialConversationId = nanoid();
-                    const now = new Date().toISOString();
-                    const initialConversation: CloudAgentConversation = {
-                        id: initialConversationId,
-                        title: "新对话",
-                        messages: [],
-                        run: null,
-                        model: selectedModel || undefined,
-                        permissionMode,
-                        skillIds: initialSkillIds,
-                        createdAt: now,
-                        updatedAt: now,
-                    };
                     setActiveConversationId(initialConversationId);
-                    setConversations([initialConversation]);
                     setSelectedSkillIds(initialSkillIds);
                     pendingSubmission.current = null;
-                    void saveCloudAgentConversations(canvasId, initialConversationId, [initialConversation]).catch((cause) => {
-                        if (active) setMessages((currentMessages) => appendAgentError(currentMessages, "initial-conversation-save-error", cause, "新对话初始化保存失败，请重试后再发送"));
-                    });
                 }
                 setPendingHydrated(true);
             })
