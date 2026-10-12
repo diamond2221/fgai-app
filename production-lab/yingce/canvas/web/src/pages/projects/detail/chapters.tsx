@@ -54,7 +54,7 @@ import { useNavigate, useParams } from "react-router";
 import { SkillRuntimePicker, useSkillRuntimeCatalog } from "@/components/skills/skill-runtime-picker";
 import { ModelPicker } from "@/components/model-picker";
 import { FGPricePreview } from "@/components/fg-price-preview";
-import { createDramaProductionPlan, dramaSegmentDurations, DRAMA_SKILL_ATTRIBUTION, type DramaProductionPlan } from "@/lib/short-drama-production";
+import { createDramaProductionPlan, dramaSegmentDurations, type DramaProductionPlan } from "@/lib/short-drama-production";
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
 import { decodeNovelText, splitTextIntoChapters } from "@/lib/canvas/canvas-document";
@@ -663,7 +663,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                     <p className="text-xs leading-5 text-foreground/50">一个片段生成一条视频，片段内可包含多个镜头。按剧情模式会在所选时长以内、至少 13 秒的支持档位中选择自然落点；保留完整对白和场面衔接。</p>
                     {planningSeconds ? <FGPricePreview config={{ ...effectiveConfig, model: planningVideoModel, videoSeconds: String(planningSeconds) }} model={planningVideoModel} mode="video" requirements={{ capability: "video", videoSeconds: String(planningSeconds), input: { textCount: 1, imageCount: 0, characterCount: 0, videoCount: 0, audioCount: 0 } }} /> : null}
                     <p className="text-[var(--fs-tiny)] text-foreground/45">上方为所选规格单条视频的费用参考；本次先生成脚本，视频在分镜制作中另行提交。</p>
-                    <div className="rounded-lg bg-foreground/[.025] p-3 text-xs leading-5 text-foreground/65"><p>{DRAMA_SKILL_ATTRIBUTION}</p><p className="mt-2">默认应用 short-drama-asset-prompts（资产设定与引用校验）和 script-to-drama-prompt-dev（片段分镜与视频提示词）。</p></div>
+                    <div className="rounded-lg bg-foreground/[.025] p-3 text-xs leading-5 text-foreground/65"><p>默认应用 short-drama-asset-prompts（资产设定与引用校验）和 script-to-drama-prompt-dev（片段分镜与视频提示词）。</p></div>
                     <div>
                         <label className="block">
                             <span className="mb-1.5 block text-xs font-medium text-foreground/68">分镜技能</span>
