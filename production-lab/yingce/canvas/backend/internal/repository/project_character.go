@@ -11,10 +11,13 @@ import (
 )
 
 func (r *Repository) ProjectCharacterAsset(userID string, projectID string, assetID string) (*model.Asset, error) {
+	if _, err := r.ProjectForUser(userID, projectID); err != nil {
+		return nil, err
+	}
 	var asset model.Asset
 	err := r.db.Table("assets").Select("assets.*").
 		Joins("JOIN project_asset_links ON project_asset_links.asset_id = assets.id").
-		Where("assets.id = ? AND assets.user_id = ? AND assets.category = ? AND project_asset_links.project_id = ?", assetID, userID, model.AssetCategoryCharacter, projectID).
+		Where("assets.id = ? AND assets.category = ? AND project_asset_links.project_id = ?", assetID, model.AssetCategoryCharacter, projectID).
 		First(&asset).Error
 	if err != nil {
 		return nil, err
@@ -200,6 +203,22 @@ func (r *Repository) SaveCharacterVersion(projectID string, asset *model.Asset, 
 			return err
 		}
 		for _, linkedProjectID := range projectIDs {
+			// Project writes validate resource access before reaching this transaction.
+			// Publish bound media with the version so shared characters cannot point
+			// at images that only the member who uploaded them can read.
+			if New(tx).FGSharedProject(linkedProjectID) {
+				if err := tx.Exec("INSERT INTO fg_asset_grants(project_id,asset_id) VALUES(?,?) ON CONFLICT DO NOTHING", linkedProjectID, asset.ID).Error; err != nil {
+					return err
+				}
+				for _, representation := range representations {
+					if representation.ResourceID == "" {
+						continue
+					}
+					if err := tx.Exec("INSERT INTO fg_resource_grants(project_id,resource_id) VALUES(?,?) ON CONFLICT DO NOTHING", linkedProjectID, representation.ResourceID).Error; err != nil {
+						return err
+					}
+				}
+			}
 			if err := tx.Model(&model.Project{}).Where("id = ?", linkedProjectID).
 				Updates(map[string]any{"revision": gorm.Expr("revision + 1"), "updated_at": time.Now()}).Error; err != nil {
 				return err

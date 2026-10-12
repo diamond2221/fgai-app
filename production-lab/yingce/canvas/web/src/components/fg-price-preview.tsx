@@ -6,7 +6,7 @@ import {modelRequestOptions,resolveVideoOperationForModel,type ModelRequirements
 type Quote={model:string;estimatedCny:number|null;estimateKind?:'estimate'|'partial'|'lower_bound';discount:number|null;fx:number;lines:string[];notes:string[];collectedAt:string};
 export function FGPricePreview({config,model,mode,requirements}:{config:AiConfig;model:string;mode?:ModelCapability;requirements?:ModelRequirements}){
  const channel=resolveModelChannel(config,model),input=requirements?.input;
- const enabled=channel.scope==='system'&&/^WeToken/.test(channel.name||'')&&['text','image','video'].includes(mode||'');
+ const enabled=channel.scope==='system'&&['text','image','video'].includes(mode||'');
  const payload=enabled?{channelId:channel.id,modelKey:modelOptionName(model),referenceVideoSeconds:requirements?.referenceVideoSeconds,intent:{capability:mode,
   operation:mode==='video'&&input?resolveVideoOperationForModel(config,model,input,requirements?.videoOperation):mode==='image'?(input?.imageCount?'image_to_image':'text_to_image'):undefined,
   inputs:{image:(input?.imageCount||0)+(input?.characterCount||0),video:input?.videoCount||0,audio:input?.audioCount||0},
