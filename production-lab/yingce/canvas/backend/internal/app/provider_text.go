@@ -36,6 +36,18 @@ func executeProtocolCreateRequest(ctx context.Context, input canvasGenerationInp
 	if wire == string(model.ChannelInterfaceOpenAIResponse) {
 		wire = "responses"
 	}
+	if input.Mode == "text" && (wire == "chat-completion" || wire == "claude-api" || wire == "responses") {
+		body := protocolBodyObject(spec.Body)
+		if body == nil {
+			return nil, nil, errors.New("声明式文本请求体必须是 JSON 对象")
+		}
+		field := "max_tokens"
+		if wire == "responses" {
+			field = "max_output_tokens"
+		}
+		applyTextOutputLimit(body, input.MaxOutputTokens, field)
+		spec.Body = body
+	}
 	if input.Mode != "text" || !input.StreamText || (wire != "chat-completion" && wire != "responses" && wire != "claude-api") {
 		data, err := executeProtocolRequest(ctx, input.Config, spec)
 		return data, nil, err

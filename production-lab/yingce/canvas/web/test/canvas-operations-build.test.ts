@@ -22,6 +22,21 @@ function canvas(patch: Partial<CanvasProject> = {}): CanvasProject {
 }
 
 describe("画布 operations 生成", () => {
+    test("生图节点的 undefined 基线在 JSON 传输后保留为 null", () => {
+        const before = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: undefined, storageKey: undefined } }] as never });
+        const after = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: "/api/resources/generated/file", storageKey: "resource:generated" } }] as never });
+        const operations = JSON.parse(JSON.stringify(buildCanvasOperations(before, after)));
+        expect(operations[0].before).toEqual({ "metadata.content": null, "metadata.storageKey": null });
+    });
+    test("旧 journal 只用保存的节点基线补回缺失字段，不丢失生成结果", () => {
+        const before = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: undefined, prompt: "original" } }] as never });
+        const after = canvas({ nodes: [{ id: "image", type: "image", metadata: { content: "/api/resources/generated/file", prompt: "original" } }] as never });
+        const request = { mutationId: "image-result", operations: [{ type: "patch_node", id: "image", patch: { "metadata.content": "/api/resources/generated/file" }, before: {} }] } as never;
+        const repaired = repairPendingCanvasMutationRequest(request, before, after);
+        expect(repaired.operations[0]).toEqual({ type: "patch_node", id: "image", patch: { "metadata.content": "/api/resources/generated/file" }, before: { "metadata.content": null } });
+        expect(repaired.mutationId).toBe("image-result");
+        expect(repairPendingCanvasMutationRequest(request, undefined, after)).toBe(request);
+    });
     test("新画布只发 create_canvas，不追加会与创建字段冲突的 set_field", () => {
         const operations = buildCanvasOperations(undefined, canvas());
         expect(operations[0]?.type).toBe("create_canvas");

@@ -48,20 +48,21 @@ type streamingAgentToolCall struct {
 }
 
 type streamingAgentParser struct {
-	protocol      string
-	buffer        string
-	text          strings.Builder
-	reasoning     strings.Builder
-	toolCalls     map[int]*streamingAgentToolCall
-	toolCallByID  map[string]int
-	completed     map[string]interface{}
-	err           error
-	emit          func(string)
-	emitReasoning func(string)
+	protocol        string
+	buffer          string
+	text            strings.Builder
+	reasoning       strings.Builder
+	toolCalls       map[int]*streamingAgentToolCall
+	toolCallByID    map[string]int
+	chatToolIndexes map[int]int
+	completed       map[string]interface{}
+	err             error
+	emit            func(string)
+	emitReasoning   func(string)
 }
 
 func newStreamingAgentParser(protocol string, emit func(string)) *streamingAgentParser {
-	return &streamingAgentParser{protocol: protocol, toolCalls: map[int]*streamingAgentToolCall{}, toolCallByID: map[string]int{}, emit: emit}
+	return &streamingAgentParser{protocol: protocol, toolCalls: map[int]*streamingAgentToolCall{}, toolCallByID: map[string]int{}, chatToolIndexes: map[int]int{}, emit: emit}
 }
 
 func (p *streamingAgentParser) consume(mimeType string, chunk []byte) {
@@ -171,10 +172,31 @@ func (p *streamingAgentParser) consumeChatCompletionEvent(payload map[string]int
 		p.appendReasoning(firstRawString(stringField(delta, "reasoning_content"), stringField(delta, "reasoning"), stringField(delta, "reasoning_text")))
 		for fallbackIndex, toolValue := range interfaceSlice(delta["tool_calls"]) {
 			tool, _ := toolValue.(map[string]interface{})
-			index := intField(tool, "index", fallbackIndex)
+			wireIndex := intField(tool, "index", fallbackIndex)
+			index, exists := p.chatToolIndexes[wireIndex]
+			if !exists {
+				index = wireIndex
+			}
+			id := stringField(tool, "id")
+			if known, ok := p.toolCallByID[id]; id != "" && ok {
+				index = known
+			} else if current := p.toolCalls[index]; id != "" && current != nil && current.id != "" && current.id != id {
+				// Some relays restart the index for each sequential Claude tool.
+				// A new ID starts a separate call; its following index-only deltas
+				// must follow this mapping rather than append to the previous JSON.
+				if !json.Valid([]byte(current.arguments)) {
+					p.err = errors.New("Agent 上游复用了未完成工具的索引")
+					return
+				}
+				index = len(p.toolCalls)
+				for p.toolCalls[index] != nil {
+					index++
+				}
+			}
+			p.chatToolIndexes[wireIndex] = index
 			function, _ := tool["function"].(map[string]interface{})
 			current := p.toolCall(index)
-			if id := stringField(tool, "id"); id != "" {
+			if id != "" {
 				current.id = id
 				p.toolCallByID[id] = index
 			}

@@ -109,6 +109,22 @@ export function repairPendingCanvasMutationRequest(request: CanvasOperationsRequ
         return false;
     });
     const operations = kept.map((operation) => {
+        if (operation.type === "patch_node") {
+            const node = baseline?.nodes.find((item) => item.id === operation.id);
+            if (!node) return operation;
+            const before = { ...operation.before };
+            let repaired = false;
+            for (const path of Object.keys(operation.patch)) {
+                if (Object.prototype.hasOwnProperty.call(before, path) && before[path] !== undefined) continue;
+                let value: unknown = node;
+                for (const key of path.split(".")) value = value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+                before[path] = canvasOperationValue(value);
+                repaired = true;
+            }
+            if (!repaired) return operation;
+            changed = true;
+            return { ...operation, before };
+        }
         if (operation.type !== "set_field") return operation;
         const hasBefore = Object.prototype.hasOwnProperty.call(operation, "beforeValue") && operation.beforeValue !== undefined;
         const hasValue = Object.prototype.hasOwnProperty.call(operation, "value") && operation.value !== undefined;
@@ -885,8 +901,8 @@ function diffCanvasObject(before: Record<string, unknown>, after: Record<string,
             continue;
         }
         if (hasBefore && hasAfter && canvasOperationValueEqual(oldValue, newValue)) continue;
-        previous[path] = hasBefore ? oldValue : null;
-        patch[path] = hasAfter ? newValue : null;
+        previous[path] = canvasOperationValue(oldValue);
+        patch[path] = canvasOperationValue(newValue);
     }
     return { patch, previous };
 }
