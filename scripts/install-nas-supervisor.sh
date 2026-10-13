@@ -82,7 +82,21 @@ PLIST
 plutil -lint "$TEMP_PLIST" >/dev/null
 install -m 600 "$TEMP_PLIST" "$PLIST_PATH"
 launchctl bootout "$USER_DOMAIN/$LABEL" 2>/dev/null || true
+BOOTOUT_WAIT_ATTEMPTS=50
+BOOTOUT_WAIT_INTERVAL=0.2
+for ((attempt = 0; attempt < BOOTOUT_WAIT_ATTEMPTS; attempt++)); do
+  if ! launchctl print "$USER_DOMAIN/$LABEL" >/dev/null 2>&1; then
+    break
+  fi
+  sleep "$BOOTOUT_WAIT_INTERVAL"
+done
+if launchctl print "$USER_DOMAIN/$LABEL" >/dev/null 2>&1; then
+  printf 'NAS supervisor installation failed: previous LaunchAgent is still loaded after %s seconds\n' \
+    "$((BOOTOUT_WAIT_ATTEMPTS / 5))" >&2
+  exit 1
+fi
+# Let RunAtLoad start the new job; force-kicking could kill a process still starting.
+# 由 RunAtLoad 启动新任务；强制 kickstart 可能杀掉仍在启动的进程。
 launchctl bootstrap "$USER_DOMAIN" "$PLIST_PATH"
-launchctl kickstart -k "$USER_DOMAIN/$LABEL"
 
 printf 'NAS supervisor installed: %s\n' "$PLIST_PATH"

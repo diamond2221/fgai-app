@@ -7,13 +7,10 @@ set -Eeuo pipefail
 export PATH="/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Capacity reporting must not wait for Docker probes, backups, or runtime recovery.
-# This collector only reads the host mount and atomically writes FG's local snapshot.
-/usr/bin/python3 "$PROJECT_ROOT/production-lab/yingce/collect-host-metrics.py" || true
 ENV_FILE="${FG_MONITOR_ENV_FILE:-$PROJECT_ROOT/.env.docker}"
 STATE_ROOT="${FG_MONITOR_STATE_DIR:-$HOME/Library/Application Support/fg-studio-monitor}"
 LOG_ROOT="${FG_MONITOR_LOG_DIR:-$HOME/Library/Logs/fg-studio-monitor}"
-LOCK_DIR="$STATE_ROOT/lock"
+LOCK_FILE="$STATE_ROOT/monitor.lock"
 DISK_THRESHOLD="${FG_MONITOR_DISK_THRESHOLD:-90}"
 MAX_APP_ERROR_LINES_PER_RUN="${FG_MONITOR_MAX_APP_ERROR_LINES_PER_RUN:-200}"
 MAX_APP_ERROR_EVENTS_PER_RUN="${FG_MONITOR_MAX_APP_ERROR_EVENTS_PER_RUN:-20}"
@@ -24,14 +21,30 @@ TUNNEL_PROBE_TIMEOUT_SECONDS="${FG_MONITOR_TUNNEL_PROBE_TIMEOUT_SECONDS:-8}"
 USER_DOMAIN="gui/$(id -u)"
 AUTO_DEPLOY_LABEL="com.fgstudio.auto-deploy"
 AUTO_DEPLOY_PLIST="$HOME/Library/LaunchAgents/$AUTO_DEPLOY_LABEL.plist"
+NAS_SUPERVISOR_LABEL="com.fgstudio.nas-supervisor"
+NAS_SUPERVISOR_PLIST="$HOME/Library/LaunchAgents/$NAS_SUPERVISOR_LABEL.plist"
+NAS_SUPERVISOR_AGENT_STATUS="unchecked"
 
 source "$PROJECT_ROOT/scripts/observability-outbox.sh"
 
 mkdir -p "$STATE_ROOT" "$LOG_ROOT" "$HOME/Library/Application Support/fg-studio-nas-state"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+# Use an OS advisory file lock; the legacy empty directory is left untouched and ignored.
+# 使用 OS advisory file lock；保留但忽略旧空目录，进程退出时内核自动释放文件锁。
+if ! exec 8>>"$LOCK_FILE"; then
+  printf '%s Monitor: cannot open singleton lock file %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$LOCK_FILE" >&2
+  exit 1
+fi
+LOCK_RESULT=0
+/usr/bin/lockf -s -t 0 8 || LOCK_RESULT=$?
+if (( LOCK_RESULT == 75 )); then
+  exec 8>&-
   exit 0
 fi
-trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+if (( LOCK_RESULT != 0 )); then
+  exec 8>&-
+  printf '%s Monitor: lockf failed for %s (exit %s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$LOCK_FILE" "$LOCK_RESULT" >&2
+  exit 1
+fi
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -305,7 +318,17 @@ check_nas() {
   [[ -f "$supervisor_root/last-storage-success" ]] && last_success="$(<"$supervisor_root/last-storage-success")"
   [[ "$last_success" =~ ^[0-9]+$ ]] || last_success=0
   now="$(date +%s)"
-  if [[ "$supervisor_state" == "ready" ]] && (( now - last_success <= 25 && now >= last_success )); then
+  if [[ "$NAS_SUPERVISOR_AGENT_STATUS" == "missing-plist" ]]; then
+    update_state nas unhealthy "NAS supervisor LaunchAgent plist is missing: $NAS_SUPERVISOR_PLIST"
+  elif [[ "$NAS_SUPERVISOR_AGENT_STATUS" == "disabled" ]]; then
+    update_state nas unhealthy "NAS supervisor LaunchAgent is explicitly disabled; leaving it disabled"
+  elif [[ "$NAS_SUPERVISOR_AGENT_STATUS" == "bootstrap-failed" ]]; then
+    update_state nas unhealthy "NAS supervisor LaunchAgent bootstrap failed; see service monitor log"
+  elif [[ "$NAS_SUPERVISOR_AGENT_STATUS" == "disabled-state-unavailable" ]]; then
+    update_state nas unknown "Cannot confirm whether NAS supervisor LaunchAgent is allowed to start"
+  elif [[ "$NAS_SUPERVISOR_AGENT_STATUS" == "bootstrapped" ]]; then
+    update_state nas unknown "NAS supervisor LaunchAgent was bootstrapped; waiting for its first storage probe"
+  elif [[ "$supervisor_state" == "ready" ]] && (( now - last_success <= 25 && now >= last_success )); then
     update_state nas healthy "App container NAS read/write probe passed within 25 seconds"
   elif [[ "$supervisor_state" == "app-transitioning" || "$supervisor_state" == "mount-requested" ]]; then
     update_state nas unknown "NAS supervisor is waiting for App deployment or SMB mount"
@@ -314,6 +337,43 @@ check_nas() {
   else
     update_state nas unhealthy "NAS supervisor storage state=$supervisor_state"
   fi
+}
+
+ensure_nas_supervisor_agent() {
+  local disabled_entry=""
+  local bootstrap_error=""
+
+  if launchctl print "$USER_DOMAIN/$NAS_SUPERVISOR_LABEL" >/dev/null 2>&1; then
+    NAS_SUPERVISOR_AGENT_STATUS="loaded"
+    return 0
+  fi
+
+  if [[ ! -f "$NAS_SUPERVISOR_PLIST" ]]; then
+    NAS_SUPERVISOR_AGENT_STATUS="missing-plist"
+    return 1
+  fi
+
+  if ! disabled_entry="$(launchctl print-disabled "$USER_DOMAIN" 2>/dev/null)"; then
+    NAS_SUPERVISOR_AGENT_STATUS="disabled-state-unavailable"
+    return 1
+  fi
+  if printf '%s\n' "$disabled_entry" | awk -v label="$NAS_SUPERVISOR_LABEL" '$1 == "\"" label "\"" && $2 == "=>" && $3 == "disabled" { found = 1 } END { exit !found }'; then
+    NAS_SUPERVISOR_AGENT_STATUS="disabled"
+    return 1
+  fi
+
+  # Bootstrap only an installed, enabled LaunchAgent. RunAtLoad starts its process;
+  # kickstart -k could forcibly terminate an already starting NAS recovery process.
+  # 仅注册已安装且允许启动的 LaunchAgent；RunAtLoad 会启动进程，kickstart -k 可能杀掉正在恢复的守护进程。
+  if bootstrap_error="$(launchctl bootstrap "$USER_DOMAIN" "$NAS_SUPERVISOR_PLIST" 2>&1)"; then
+    NAS_SUPERVISOR_AGENT_STATUS="bootstrapped"
+    log "Monitor: NAS supervisor LaunchAgent was bootstrapped; waiting for its storage probe"
+    return 0
+  fi
+
+  NAS_SUPERVISOR_AGENT_STATUS="bootstrap-failed"
+  log "Monitor: NAS supervisor LaunchAgent bootstrap failed${bootstrap_error:+: $bootstrap_error}"
+  return 1
 }
 
 check_app() {
@@ -591,6 +651,11 @@ check_auto_deploy() {
 }
 
 [[ -f "$ENV_FILE" ]] || { log "Monitor: missing environment file $ENV_FILE"; exit 1; }
+ensure_nas_supervisor_agent || true
+check_nas
+# Capacity reporting only reads the host mount and atomically writes FG's local snapshot.
+# 容量采集只读取宿主机挂载并原子更新本地快照，不依赖 Docker 可用。
+/usr/bin/python3 "$PROJECT_ROOT/production-lab/yingce/collect-host-metrics.py" || true
 if ! docker info >/dev/null 2>&1; then
   update_state docker unhealthy "Docker Desktop is unavailable; requesting application start"
   /usr/bin/open -gja Docker >/dev/null 2>&1 || true
@@ -598,7 +663,6 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 update_state docker healthy "Docker daemon is available"
-check_nas
 check_app
 check_nginx
 check_nginx_5xx
