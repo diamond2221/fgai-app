@@ -763,8 +763,8 @@ export type ReportRunFilters = {
   search?: string;
 };
 
-export async function listReportRuns(limit = 30, filters: ReportRunFilters = {}) {
-  const safeLimit = Math.min(100, Math.max(1, Math.floor(limit)));
+export async function listReportRuns(limitPerType = 30, filters: ReportRunFilters = {}) {
+  const safeLimit = Math.min(100, Math.max(1, Math.floor(limitPerType)));
   const values: Array<string | number> = [];
   const conditions: string[] = [];
   // Filter on PostgreSQL before applying the display limit so old reports stay searchable.
@@ -793,13 +793,21 @@ export async function listReportRuns(limit = 30, filters: ReportRunFilters = {})
   }
   values.push(safeLimit);
   const limitIndex = values.length;
+  // Limit each report type independently so frequent daily runs cannot hide monthly reports.
+  // 按报表类型分别限制历史数量，避免频繁生成的日报挤掉月报。
   const reportSql = [
+    "with ranked_runs as (",
+    "  select *, row_number() over (",
+    "    partition by report_type order by period_start desc, revision desc, id asc",
+    "  ) as type_rank",
+    "    from report_runs",
+    conditions.length ? "   where " + conditions.join(" and ") : "",
+    ")",
     "select id, report_type, period_start, period_end, revision, status, is_final,",
     "       data_as_of, schema_version, summary, error, created_at, updated_at",
-    "  from report_runs",
-    conditions.length ? " where " + conditions.join(" and ") : "",
-    " order by period_start desc, report_type asc, revision desc",
-    " limit $" + limitIndex,
+    "  from ranked_runs",
+    " where type_rank <= $" + limitIndex,
+    " order by period_start desc, report_type asc, revision desc, id asc",
   ].filter(Boolean).join("\n");
   const result = await query<ReportRunRecord>(reportSql, values);
   return result.rows;
