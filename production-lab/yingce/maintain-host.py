@@ -14,6 +14,20 @@ NAS = pathlib.Path('/Volumes/FgStudio/media')
 DOCKER = '/usr/local/bin/docker'
 os.environ['PATH'] = '/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 
+# Text replay is a browser-managed archive, not a provider worker. Preserve
+# recent streams, but an abandoned archive must not prevent NAS recovery forever.
+# Unknown task states still block recovery. This query never changes task data.
+ACTIVE_TASK_COUNT_SQL = """
+SELECT count(*) FROM tasks AS t
+WHERE t.status NOT IN ('succeeded','failed','cancelled')
+AND (
+    t.status <> 'text_replay'
+    OR GREATEST(t.created_at, t.updated_at,
+        (SELECT max(d.created_at) FROM task_text_delta AS d WHERE d.task_id = t.id))
+        > now() - interval '15 minutes'
+)
+"""
+
 def run(*args, **kwargs):
     return subprocess.run(args, check=True, timeout=45, **kwargs)
 
@@ -49,7 +63,7 @@ def container_ready(service, marker):
 def rebind_storage(services):
     # A recovered host SMB mount does not repair existing Docker bind mounts.
     # Recreate only sixth-module services, with no active provider or Agent work.
-    count = run(DOCKER, 'exec', 'fg-six-yingce-postgres-1', 'psql', '-U', 'fg_yingce', '-d', 'fg_yingce', '-At', '-c', "SELECT count(*) FROM tasks WHERE status NOT IN ('succeeded','failed','cancelled')", capture_output=True, text=True).stdout.strip()
+    count = run(DOCKER, 'exec', 'fg-six-yingce-postgres-1', 'psql', '-U', 'fg_yingce', '-d', 'fg_yingce', '-At', '-c', ACTIVE_TASK_COUNT_SQL, capture_output=True, text=True).stdout.strip()
     if count != '0':
         print('Sixth NAS rebind deferred: active tasks', flush=True)
         return False
