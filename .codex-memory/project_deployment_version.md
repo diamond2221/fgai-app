@@ -19,3 +19,5 @@ metadata:
 **Why:** 2026-10-12 的生产系统日志确认：14:32:55，经 SSH 执行的 Python 程序主动调用 `launchctl bootout` 卸载 NAS supervisor 和 service-monitor；NAS 任务于 14:33:00 被移除。已查到调用链，尚未确认具体操作者或 Python 脚本来源，不能归因于 NAS 网络故障或普通进程崩溃。LaunchAgent 的 plist 存在且 enabled 不等于任务已加载；被卸载后定时器不会自行恢复任务。
 
 **How to apply:** 先只读区分任务未加载、探针失败和 NAS 网络故障；已加载任务保持运行，缺失且未显式禁用的任务可按授权恢复。安装器与维护脚本也必须遵守保护规则，不得通过暂停生产任务验证恢复逻辑；不能以状态日志长时间没有更新推断进程已停止。
+
+macOS 的 `/dev/fd/N` 属于 fdescfs，路径 `stat` 的设备号可能与真实文件不同，不能用 Bash `-ef` 判断继承的锁 FD 是否指向锁文件；应比较 `fstat(fd)` 与 `stat(path)`。锁文件留在磁盘上不表示被占用，禁止通过删除锁文件或停止生产守护进程解决锁冲突。部署是否完成必须核对实际运行版本，不能仅比较 checkout 与 origin 的提交。

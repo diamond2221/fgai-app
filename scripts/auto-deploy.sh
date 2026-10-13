@@ -30,6 +30,7 @@ RECREATE_LOCK_FILE="$HOME/Library/Application Support/fg-studio-app-recreate/loc
 RECREATE_LOCK_HELD=0
 FAILED_SHA_FILE="$STATE_ROOT/failed-sha"
 FAILED_DETAIL_FILE="$STATE_ROOT/failed-detail"
+PENDING_DEPLOY_FILE="$STATE_ROOT/pending-deploy"
 LAST_BUILD_LOG_FILE=""
 ROLLBACK_FAILED_SHA=""
 
@@ -37,7 +38,9 @@ mkdir -p "$STATE_ROOT" "$NAS_GUARD_ROOT"
 # Keep FD8 inherited only during the in-process version handoff after the lock is acquired.
 # 只有已持锁的脚本版本交接才沿用 FD8，避免重开锁文件时释放单例锁。
 if [[ "${FG_AUTO_DEPLOY_LOCK_HELD:-}" == "1" ]]; then
-  if ! { : >&8; } 2>/dev/null || ! [[ /dev/fd/8 -ef "$LOCK_FILE" ]]; then
+  # macOS /dev/fd entries have devfs identities; compare the open file with fstat.
+  # macOS 的 /dev/fd 是 devfs 节点，必须用 fstat 校验真实文件身份。
+  if ! /usr/bin/python3 -c 'import os,sys; a=os.fstat(8); b=os.stat(sys.argv[1]); sys.exit((a.st_dev,a.st_ino)!=(b.st_dev,b.st_ino))' "$LOCK_FILE" 2>/dev/null; then
     printf 'Auto deploy: inherited singleton lock descriptor is invalid\n' >&2
     exit 1
   fi
@@ -592,7 +595,20 @@ if [[ -n "$DEPLOY_TARGET_SHA" ]]; then
     exit 1
   fi
 else
-  fetch_main || exit 1
+  # Resume an interrupted handoff before depending on another network fetch.
+  # 优先恢复已落盘的部署交接，避免网络失败阻塞已拉取代码的部署。
+  if [[ -f "$PENDING_DEPLOY_FILE" ]]; then
+    pending_target=""
+    pending_previous=""
+    if read -r pending_target pending_previous < "$PENDING_DEPLOY_FILE" \
+      && [[ "$pending_target" == "$(git -C "$PROJECT_ROOT" rev-parse HEAD)" ]] \
+      && [[ "$(cat "$FAILED_SHA_FILE" 2>/dev/null || true)" != "$pending_target" ]]; then
+      if pending_previous="$(git -C "$PROJECT_ROOT" rev-parse --verify "$pending_previous^{commit}" 2>/dev/null)"; then
+        exec env FG_AUTO_DEPLOY_LOCK_HELD=1 FG_AUTO_DEPLOY_TARGET_SHA="$pending_target" FG_AUTO_DEPLOY_PREVIOUS_SHA="$pending_previous" "$BASH" "$0"
+      fi
+    fi
+  fi
+  fetch_main || log "Auto deploy: fetch failed; checking the already fetched revision for an incomplete deployment"
 
   current_sha="$(git -C "$PROJECT_ROOT" rev-parse "$BRANCH")"
   target_sha="$(git -C "$PROJECT_ROOT" rev-parse "$REMOTE/$BRANCH")"
@@ -617,7 +633,24 @@ else
       log "Auto deploy: skipping previously failed commit $target_sha until a safe rollback is available"
       exit 0
     fi
-    exit 0
+    # A fast-forwarded checkout is not proof that its container was deployed.
+    # 仓库已快进不代表容器已部署，核对运行容器版本以恢复历史中断。
+    running_version="$(compose exec -T app printenv APP_DEPLOYMENT_VERSION 2>/dev/null)" || {
+      log "Auto deploy: cannot inspect running deployment; waiting"
+      exit 1
+    }
+    running_sha="${running_version##*-}"
+    if [[ "$running_sha" == "${target_sha:0:12}" ]]; then
+      rm -f "$PENDING_DEPLOY_FILE"
+      exit 0
+    fi
+    if [[ ! "$running_sha" =~ ^[0-9a-f]{12,40}$ ]] || ! previous_sha="$(git -C "$PROJECT_ROOT" rev-parse --verify "$running_sha^{commit}" 2>/dev/null)"; then
+      log "Auto deploy: cannot resolve running revision for safe rollback; waiting"
+      exit 1
+    fi
+    printf '%s %s\n' "$target_sha" "$previous_sha" > "$PENDING_DEPLOY_FILE.tmp"
+    mv "$PENDING_DEPLOY_FILE.tmp" "$PENDING_DEPLOY_FILE"
+    exec env FG_AUTO_DEPLOY_LOCK_HELD=1 FG_AUTO_DEPLOY_TARGET_SHA="$target_sha" FG_AUTO_DEPLOY_PREVIOUS_SHA="$previous_sha" "$BASH" "$0"
   fi
 
   failed_sha=""
@@ -638,6 +671,8 @@ else
     exit 0
   fi
 
+  printf '%s %s\n' "$target_sha" "$current_sha" > "$PENDING_DEPLOY_FILE.tmp"
+  mv "$PENDING_DEPLOY_FILE.tmp" "$PENDING_DEPLOY_FILE"
   log "Auto deploy: updating $current_sha -> $target_sha"
   if ! git -C "$PROJECT_ROOT" merge --ff-only "$REMOTE/$BRANCH" >/dev/null; then
     log "Auto deploy: $BRANCH is not fast-forwardable; refusing to deploy"
@@ -728,5 +763,5 @@ if ! compose up -d --no-deps --force-recreate --remove-orphans app >/dev/null \
 fi
 release_recreate_lock
 
-rm -f "$FAILED_SHA_FILE" "$FAILED_DETAIL_FILE"
+rm -f "$FAILED_SHA_FILE" "$FAILED_DETAIL_FILE" "$PENDING_DEPLOY_FILE"
 log "Auto deploy: commit $target_sha is healthy (deployment $APP_DEPLOYMENT_VERSION)"

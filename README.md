@@ -135,7 +135,7 @@ scripts/install-auto-deploy.sh
 
 Docker 主机使用统一 LaunchAgent 每 30 秒检查 Docker、NAS、App HTTP、PostgreSQL、Cloudflare Tunnel、系统磁盘和 App 新增 `error/fail` 日志。Tunnel 监控同时检查本地 connector 和 `PROVIDER_MEDIA_URL` 公网媒体地址，避免把“进程存活”误判为“Wetoken 可下载素材”；连续 2 次失败后自动重启 connector，并在 5 分钟冷却窗口内抑制重复重启。App 异常由 NAS supervisor 重建，PostgreSQL 连续 3 次 unhealthy 后自动重启；Docker Desktop 不可用时会请求 macOS 启动。所有容器使用 Docker `local` logging driver，单文件上限 20 MB、最多保留 10 个轮转文件。
 
-服务监控在检查 Docker 前，会重新注册已安装但被卸载的 NAS LaunchAgent；显式禁用的任务不会被重新启用。监控使用系统文件锁，进程退出后自动释放，不再因遗留目录锁永久跳过检查。**未经用户明确、强制要求，绝不能主动停止生产守护进程**，包括通过安装、重载或排障脚本间接停止；受保护任务清单及命令限制统一见 [AGENTS.md](AGENTS.md#生产守护进程保护硬性约束)。
+服务监控在检查 Docker 前，会重新注册已安装但被卸载的 NAS LaunchAgent；显式禁用的任务不会被重新启用。服务监控与报表调度使用系统文件锁，进程退出后自动释放，不再因遗留目录锁永久跳过检查。**未经用户明确、强制要求，绝不能主动停止生产守护进程**，包括通过安装、重载或排障脚本间接停止；受保护任务清单及命令限制统一见 [AGENTS.md](AGENTS.md#生产守护进程保护硬性约束)。
 
 NAS、服务监控、自动部署和报表调度安装器发现任务已加载时会直接退出，不修改 plist 或重启任务；仅为未加载且未显式禁用的任务执行安装和 `bootstrap`，由 `RunAtLoad` 启动。
 

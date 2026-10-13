@@ -9,13 +9,26 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${FG_REPORT_SCHEDULER_ENV_FILE:-$PROJECT_ROOT/.env.docker}"
 STATE_ROOT="${FG_REPORT_SCHEDULER_STATE_DIR:-$HOME/Library/Application Support/fg-studio-report-scheduler}"
-LOCK_DIR="$STATE_ROOT/lock"
+LOCK_FILE="$STATE_ROOT/scheduler.lock"
 
 mkdir -p "$STATE_ROOT"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+if ! exec 8>>"$LOCK_FILE"; then
+  printf '%s Report scheduler: cannot open singleton lock file %s\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$LOCK_FILE" >&2
+  exit 1
+fi
+LOCK_RESULT=0
+/usr/bin/lockf -s -t 0 8 || LOCK_RESULT=$?
+if (( LOCK_RESULT == 75 )); then
+  exec 8>&-
   exit 0
 fi
-trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+if (( LOCK_RESULT != 0 )); then
+  exec 8>&-
+  printf '%s Report scheduler: lockf failed for %s (exit %s)\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$LOCK_FILE" "$LOCK_RESULT" >&2
+  exit 1
+fi
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
