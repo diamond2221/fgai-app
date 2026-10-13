@@ -630,6 +630,7 @@ check_app_errors() {
 }
 
 check_auto_deploy() {
+  local disabled_entry=""
   if launchctl print "$USER_DOMAIN/$AUTO_DEPLOY_LABEL" >/dev/null 2>&1; then
     update_state auto-deploy healthy "LaunchAgent is loaded"
     return
@@ -640,10 +641,18 @@ check_auto_deploy() {
     return
   fi
 
-  # Reload the missing user agent so deployment monitoring survives an unload.
-  # 服务被卸载后自动重新注册，避免只能依赖人工重新安装部署守护进程。
-  if launchctl bootstrap "$USER_DOMAIN" "$AUTO_DEPLOY_PLIST" >/dev/null 2>&1 \
-    && launchctl kickstart -k "$USER_DOMAIN/$AUTO_DEPLOY_LABEL" >/dev/null 2>&1; then
+  if ! disabled_entry="$(launchctl print-disabled "$USER_DOMAIN" 2>/dev/null)"; then
+    update_state auto-deploy unknown "Cannot confirm whether auto-deploy LaunchAgent is allowed to start"
+    return
+  fi
+  if printf '%s\n' "$disabled_entry" | awk -v label="$AUTO_DEPLOY_LABEL" '$1 == "\"" label "\"" && $2 == "=>" && $3 == "disabled" { found = 1 } END { exit !found }'; then
+    update_state auto-deploy unhealthy "LaunchAgent is explicitly disabled; leaving it disabled"
+    return
+  fi
+
+  # RunAtLoad starts the missing agent without killing a newly spawned deployment.
+  # 由 RunAtLoad 启动缺失任务，禁止强制重启刚开始运行的部署进程。
+  if launchctl bootstrap "$USER_DOMAIN" "$AUTO_DEPLOY_PLIST" >/dev/null 2>&1; then
     update_state auto-deploy healthy "LaunchAgent was reloaded by service monitor"
   else
     update_state auto-deploy unhealthy "LaunchAgent is missing and automatic reload failed"

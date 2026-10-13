@@ -7,6 +7,20 @@ LABEL="com.fgstudio.nas-supervisor"
 PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs"
 USER_DOMAIN="gui/$(id -u)"
+# Never replace a loaded production job through the installer.
+# 安装器不通过替换流程中断已加载的生产任务。
+if launchctl print "$USER_DOMAIN/$LABEL" >/dev/null 2>&1; then
+  printf '%s is already loaded; leaving it running without changing its plist or Keychain.\n' "$LABEL"
+  exit 0
+fi
+if ! DISABLED_SERVICES="$(launchctl print-disabled "$USER_DOMAIN" 2>&1)"; then
+  printf 'Cannot read disabled state for %s; refusing installation: %s\n' "$LABEL" "$DISABLED_SERVICES" >&2
+  exit 1
+fi
+if printf '%s\n' "$DISABLED_SERVICES" | awk -v label="$LABEL" '$1 == "\"" label "\"" && $2 == "=>" && $3 == "disabled" { found = 1 } END { exit !found }'; then
+  printf '%s is explicitly disabled; refusing to enable or install it.\n' "$LABEL" >&2
+  exit 1
+fi
 DOCKER_BIN_DIR="$(dirname "$(command -v docker)")"
 ENV_FILE="$PROJECT_ROOT/.env.docker"
 KEYCHAIN_SERVICE="com.fgstudio.nas-supervisor.smb"
@@ -81,20 +95,6 @@ PLIST
 
 plutil -lint "$TEMP_PLIST" >/dev/null
 install -m 600 "$TEMP_PLIST" "$PLIST_PATH"
-launchctl bootout "$USER_DOMAIN/$LABEL" 2>/dev/null || true
-BOOTOUT_WAIT_ATTEMPTS=50
-BOOTOUT_WAIT_INTERVAL=0.2
-for ((attempt = 0; attempt < BOOTOUT_WAIT_ATTEMPTS; attempt++)); do
-  if ! launchctl print "$USER_DOMAIN/$LABEL" >/dev/null 2>&1; then
-    break
-  fi
-  sleep "$BOOTOUT_WAIT_INTERVAL"
-done
-if launchctl print "$USER_DOMAIN/$LABEL" >/dev/null 2>&1; then
-  printf 'NAS supervisor installation failed: previous LaunchAgent is still loaded after %s seconds\n' \
-    "$((BOOTOUT_WAIT_ATTEMPTS / 5))" >&2
-  exit 1
-fi
 # Let RunAtLoad start the new job; force-kicking could kill a process still starting.
 # 由 RunAtLoad 启动新任务；强制 kickstart 可能杀掉仍在启动的进程。
 launchctl bootstrap "$USER_DOMAIN" "$PLIST_PATH"
