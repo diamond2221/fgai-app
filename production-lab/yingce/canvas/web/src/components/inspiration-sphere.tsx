@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "antd";
 import { createPortal } from "react-dom";
 import { Maximize2, Minimize2 } from "lucide-react";
@@ -8,17 +8,21 @@ import "./inspiration-sphere.css";
 import { bundledInspirationCover } from "@/lib/inspiration-cover";
 
 export type SphereEntry = { id: string; title: string; cover: string; sourceName?: string };
-export function InspirationSphere({ items, onSelect, compact = false }: { items: SphereEntry[]; onSelect: (item: SphereEntry) => void; compact?: boolean }) {
+export function InspirationSphere({ items, onSelect, compact = false, toolbar, collectionName = "灵感星球", exitSignal = 0 }: { items: SphereEntry[]; onSelect: (item: SphereEntry) => void; compact?: boolean; toolbar?: ReactNode; collectionName?: string; exitSignal?: number }) {
     const host = useRef<HTMLDivElement>(null);
     const [fullscreen,setFullscreen] = useState(false);
+    useEffect(()=>setFullscreen(false),[exitSignal]);
     const fullButton = useRef<HTMLButtonElement>(null);
     useEffect(()=>{
         if(!fullscreen)return;
         const previous=document.body.style.overflow;document.body.style.overflow="hidden";
         const escape=(event:KeyboardEvent)=>{
+            // The detail dialog has its own Escape key and focus trap above this space.
+            if(document.querySelector(".fg-inspiration-modal"))return;
+            if(document.querySelector(".fg-sphere-filters .ant-select-dropdown:not(.ant-select-dropdown-hidden)"))return;
             if(event.key==="Escape"){setFullscreen(false);return;}
             if(event.key!=="Tab")return;
-            const controls=Array.from(document.querySelectorAll<HTMLElement>(".fg-sphere.is-fullscreen button,.fg-sphere.is-fullscreen summary")).filter(element=>element.offsetParent!==null);
+            const controls=Array.from(document.querySelectorAll<HTMLElement>(".fg-sphere.is-fullscreen button,.fg-sphere.is-fullscreen summary,.fg-sphere.is-fullscreen input")).filter(element=>element.offsetParent!==null);
             const first=controls[0],last=controls.at(-1);
             if(!first||!last)return;
             if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
@@ -29,7 +33,7 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
         return()=>{document.body.style.overflow=previous;document.removeEventListener("keydown",escape);window.requestAnimationFrame(()=>fullButton.current?.focus());};
     },[fullscreen]);
     const select = useRef(onSelect);
-    select.current = (item) => { setFullscreen(false); onSelect(item); };
+    select.current = onSelect;
     const [failed, setFailed] = useState(false);
     const [active, setActive] = useState<SphereEntry>();
     const [paused, setPaused] = useState(false);
@@ -39,7 +43,7 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
     const bundled = available.filter((item) => !item.cover.startsWith("https:"));
     // Prefer the locally shipped selection for a dependable first view; smaller or personal
     // collections can still use their external covers through the authenticated proxy.
-    const entries = (bundled.length >= 8 ? bundled : available).slice(0, 144);
+    const entries = (bundled.length >= 8 ? bundled : available).slice(0, 180);
     const key = entries.map((item) => item.id + item.cover).join("|");
     useEffect(() => {
         const element = host.current;
@@ -73,7 +77,7 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
         const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
         const group = new THREE.Group();
         scene.add(group);
-        const geometry = new THREE.PlaneGeometry(2.05, 1.35, 8, 1);
+        const geometry = new THREE.PlaneGeometry(1.58, 1.02, 8, 1);
         const positions=geometry.attributes.position;
         for(let i=0;i<positions.count;i++) {const x=positions.getX(i);positions.setZ(i,10-Math.sqrt(100-x*x));}
         geometry.computeVertexNormals();
@@ -90,10 +94,10 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
         const materialsByEntry = entries.map(() => new THREE.MeshBasicMaterial({color:"white",side:THREE.DoubleSide}));
         materials.push(...materialsByEntry);
         const cardsByEntry: THREE.Mesh[][] = entries.map(()=>[]);
-        const columns=28, rows=11;
+        const columns=36, rows=15;
         for(let row=0;row<rows;row++)for(let column=0;column<columns;column++){
             const index=(row*columns+column)%entries.length, item=entries[index];
-            const latitude=(row-(rows-1)/2)*0.17;
+            const latitude=(row-(rows-1)/2)*0.105;
             const longitude=(column+(row%2)*0.38)*Math.PI*2/columns;
             const card=new THREE.Mesh(geometry,materialsByEntry[index]);
             card.position.set(Math.sin(longitude)*Math.cos(latitude)*10,Math.sin(latitude)*10,Math.cos(longitude)*Math.cos(latitude)*10);
@@ -109,7 +113,7 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
                 const image=texture.image as {width:number;height:number};
                 for(const card of cardsByEntry[index]){
                     card.visible=true;
-                    if(image.width&&image.height)card.scale.x=Math.min(1.1,Math.max(0.45,image.width/image.height/(2.05/1.35)));
+                    if(image.width&&image.height)card.scale.x=Math.min(1.05,Math.max(0.45,image.width/image.height/(1.58/1.02)));
                 }
                 settled++;loaded++;
             },undefined,()=>{if(disposed)return;settled++;if(settled===entries.length&&loaded===0)setFailed(true);});
@@ -184,10 +188,11 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
     const content = (
         <section className={`fg-sphere ${compact ? "is-compact" : ""} ${fullscreen ? "is-fullscreen" : ""}`} aria-label="灵感星球" role={fullscreen?"dialog":undefined} aria-modal={fullscreen||undefined}>
             <div className="fg-sphere-topline"><span>灵感星球 · {entries.length} 个作品</span></div>
+            {toolbar ? <div className="fg-sphere-filters" aria-label="星球筛选">{toolbar}</div> : null}
             <Button ref={fullButton} className="fg-sphere-fullscreen" aria-label={fullscreen?"退出全屏漫游":"全屏漫游"} onClick={()=>setFullscreen(value=>!value)} icon={fullscreen?<Minimize2 size={18}/>:<Maximize2 size={18}/>}/>
             <div ref={host} className="fg-sphere-stage" style={{display: failed || !entries.length ? "none" : undefined}} />
             {failed || !entries.length ? <div className="fg-sphere-fallback">{failed ? "当前设备暂时无法显示星球视图，可在下方浏览作品。" : "当前筛选没有可展示的图片，试试其他分类。"}</div> : null}
-            <div className="fg-sphere-center" aria-live="polite"><strong>{active?.title || "灵感星球"}</strong><span>{active?"点击查看提示词":`${entries.length} 个作品`}</span></div>
+            <div className="fg-sphere-center" aria-live="polite"><strong>{active?.title || collectionName}</strong><span>{active?"点击查看提示词":`${entries.length} 个作品`}</span></div>
             <div className="fg-sphere-help">拖动旋转 · 滚轮钻进 · 点击打开{fullscreen?" · Esc 退出":""}</div>
             <Button className="fg-sphere-pause" onClick={() => setPaused((value) => !value)} aria-pressed={paused}>
                 {paused ? "继续旋转" : "暂停旋转"}

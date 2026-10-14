@@ -1101,9 +1101,6 @@ export default function CreatePage() {
     return <>
         <div className="creation-home relative flex h-full min-h-0 flex-col overflow-hidden">
             {isEmpty ? <>
-                <div className="creation-top-actions">
-                    <Tooltip title="历史对话"><button type="button" aria-label="查看历史对话" aria-expanded={historyOpen} className="creation-top-action" onClick={() => setHistoryOpen(true)}><History /></button></Tooltip>
-                </div>
                 <AnimatePresence>
                     {launchpadCondensed && !agentMode ? <motion.div className="creation-floating-prompt" key="floating-prompt"
                         style={{ x: "-50%" }}
@@ -1120,6 +1117,7 @@ export default function CreatePage() {
                 <main ref={threadScrollRef} onScroll={handleThreadScroll} className="creation-empty-workspace creation-scrollbar">
                 <div className="creation-home-heading">
                     <div className="fg-creation-signature"><Magnet><GlassAgent size={76} /></Magnet><span>FG / CREATIVE STUDIO</span></div>
+                    <button type="button" aria-label="查看历史对话" aria-expanded={historyOpen} className="creation-home-history-entry" onClick={() => setHistoryOpen(true)}><History size={16}/><span>历史对话</span></button>
                     <h1>和{brandName}聊聊创作想法</h1>
                     <p>从一个画面、一个角色或一句话开始，继续你的创作。</p>
                 </div>
@@ -1135,10 +1133,6 @@ export default function CreatePage() {
                 </section>
                 <div className="creation-home-hub">
                     <CreationRecentCanvases onRequireLogin={() => setLoginDialogOpen(true)} />
-                    <section className="creation-recent-chats" aria-labelledby="recent-chats-title">
-                        <header className="creation-section-heading"><h2 id="recent-chats-title"><History size={18}/>历史对话</h2><button type="button" onClick={() => setHistoryOpen(true)}>查看全部 ↗</button></header>
-                        <div className="creation-chat-strip">{historyConversations.slice(0,4).map((conversation) => <button type="button" key={conversation.id} onClick={() => selectConversation(conversation)}><strong>{conversation.title || "新创作"}</strong><span>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</span></button>)}{!historyConversations.length ? <p>你的创作对话会保存在这里，随时继续。</p> : null}</div>
-                    </section>
                     <Suspense fallback={<Spin/>}><FGInspirationPage embedded onUsePrompt={(nextMode, value) => { setAgentMode(false); selectMode(nextMode); setPrompt(value); threadScrollRef.current?.scrollTo({top:0,behavior:reducedMotion ? "auto" : "smooth"}); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}/></Suspense>
                 </div>
                 {inspirationSourcesVisible ? <div className="creation-inspiration-credit">
