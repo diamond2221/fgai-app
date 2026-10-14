@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ImageParameterFields, ImageParameterSchemaEditor, ImagePixelMappingEditor } from "../src/components/image-parameter-fields";
 import { ModelCapabilityEditor } from "../src/components/model-capability-editor";
 import { imagePresetForRatio } from "../src/lib/image-size-presets";
-import { imageParameterConstraints, imageParameterRequest, initializeImageRatioDefaults, normalizeImageParameters, projectImageParameters, updateImageParameterSchema, updateImageParameterSize, type ImageParameter } from "../src/lib/image-parameters";
+import { imageParameterDefaults, imageParameterConstraints, imageParameterRequest, initializeImageRatioDefaults, normalizeImageParameters, projectImageParameters, updateImageParameterSchema, updateImageParameterSize, type ImageParameter } from "../src/lib/image-parameters";
 import { defaultImageCapabilityConfig } from "../src/lib/model-capabilities";
 import { projectLogicalCapability } from "../src/lib/user-session";
 import { capabilitySpecFromChannelModel, mergeCapabilitySpecs, normalizeCapabilitySpecForSources } from "../src/pages/admin/logical-models/model-routing-capabilities";
@@ -32,6 +32,12 @@ function fixture(fields = parameters) {
 }
 
 describe("plugin image parameters across model configuration and generation", () => {
+    test("legacy API models with null image parameters can initialize the creation page", () => {
+        expect(imageParameterDefaults(null)).toEqual({});
+        expect(normalizeImageParameters(null, { staleParameter: 123 })).toEqual({});
+        expect(normalizeImageParameters(undefined)).toEqual({});
+        expect(normalizeImageParameters(parameters, { creativeAmount: 7 }).creativeAmount).toBe(7);
+    });
     test("new resolution selects the six preferred ratios without changing existing choices", () => {
         const fields: ImageParameter[] = [
             { name: "size", label: "画幅", type: "string", encoding: "pixels" },
