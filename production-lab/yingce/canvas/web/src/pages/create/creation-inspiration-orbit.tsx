@@ -20,9 +20,9 @@ export function CreationInspirationOrbit({ mode, onStartPrompt }: { mode: Creati
         setData(undefined);
         setSelected(undefined);
         setError("");
-        void http
-            .get<typeof data>(`/fg/inspiration?kind=${mode === "video" ? "video" : "image"}&category=${encodeURIComponent(category)}&page=1`, { signal: controller.signal })
-            .then(setData)
+        const query = `/fg/inspiration?kind=${mode === "video" ? "video" : "image"}&category=${encodeURIComponent(category)}`;
+        void Promise.all([1, 2, 3].map((page) => http.get<NonNullable<typeof data>>(`${query}&page=${page}`, { signal: controller.signal })))
+            .then((pages) => setData({ ...pages[0], items: [...new Map(pages.flatMap((page) => page.items).map((item) => [item.id, item])).values()] }))
             .catch((error) => {
                 if (!controller.signal.aborted) setError(error.message || "灵感读取失败");
             });

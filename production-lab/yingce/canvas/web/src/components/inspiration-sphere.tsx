@@ -38,7 +38,7 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
         element.appendChild(renderer.domElement);
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 60);
-        camera.position.set(0, 0, 13);
+        camera.position.set(0, 0, 8.8);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.075;
@@ -52,7 +52,7 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
         const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
         const group = new THREE.Group();
         scene.add(group);
-        const geometry = new THREE.PlaneGeometry(1.55, 1.12);
+        const geometry = new THREE.PlaneGeometry(2.0, 1.45);
         const textures: THREE.Texture[] = [],
             materials: THREE.MeshBasicMaterial[] = [];
         const cards: THREE.Mesh[] = [];
@@ -90,7 +90,7 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
                     material.needsUpdate = true;
                     card.visible = true; settled++; loaded++;
                     const image = texture.image as { width: number; height: number };
-                    if (image.width && image.height) card.scale.x = Math.min(1.7, Math.max(0.5, image.width / image.height / (1.55 / 1.12)));
+                    if (image.width && image.height) card.scale.x = Math.min(1.7, Math.max(0.5, image.width / image.height / (2.0 / 1.45)));
                 },
                 undefined,
                 () => {
@@ -172,7 +172,8 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
                 <h2>进入画面的另一面。</h2>
                 <p>拖动环顾 · 滚轮进入星球 · 点击作品查看提示词</p>
             </div>
-            {!failed && entries.length ? <div ref={host} className="fg-sphere-stage" /> : <div className="fg-sphere-fallback">{failed ? "当前设备暂时无法显示星球视图，可在下方浏览作品。" : "当前筛选没有可展示的图片，试试其他分类。"}</div>}
+            <div ref={host} className="fg-sphere-stage" style={{display: failed || !entries.length ? "none" : undefined}} />
+            {failed || !entries.length ? <div className="fg-sphere-fallback">{failed ? "当前设备暂时无法显示星球视图，可在下方浏览作品。" : "当前筛选没有可展示的图片，试试其他分类。"}</div> : null}
             <div className="fg-sphere-caption" aria-live="polite">
                 {active ? (
                     <>
