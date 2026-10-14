@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.4";
+export const CURRENT_RELEASE_VERSION = "1.3.5";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,18 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月14日",
+        items: [
+            { type: "新增", content: "新增图片与视频工作台，提供商品、服装、人物及视频制作等 118 项工具与提示词预设，管理员可管理工具和开放入口。" },
+            { type: "新增", content: "内置影视剧作工坊知识包，覆盖剧本、风格、角色、表演、分镜、运镜、声音与交付审核，Agent 可按任务读取。" },
+            { type: "优化", content: "工作台复用公司模型、人民币报价、任务与素材保存；保留公司账户管理、权限、费用和预算校验。" },
+            { type: "更新", content: "同步画布图片参数合同、模型调用状态、个人头像、登录日志和审批恢复等改进，保留 FG 适配。" },
+            { type: "修复", content: "维护任务安装器保留已加载的守护进程，明确禁用时拒绝安装，不通过卸载重装中断生产监控。" },
+            { type: "说明", content: "模型能力、费用估算和实际生成结果分别核验；本版发布不表示所有工具与参数组合都已完成付费生成验收。" },
+        ],
+    },
+    {
+        version: "1.3.4",
         date: "2026年10月12日",
         items: [
             { type: "新增", content: "故事投稿支持查看完整信息、审核通过、填写驳回原因、撤回及归档，保留审核历史；通过后进入故事库，正在制作的故事先处理关联项目。" },

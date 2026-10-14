@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 
 import { ImageSizePicker } from "@/components/image-size-picker";
+import { FGPricePreview } from "@/components/fg-price-preview";
 import { MediaPreview } from "@/components/media-preview";
 import { ModelPicker } from "@/components/model-picker";
 import { SpotlightSurface } from "@/components/ui/aceternity/spotlight-surface";
@@ -1245,7 +1246,10 @@ export function WorkbenchPage({ kind }: { kind: WorkbenchKind }) {
                                     </div>
                                 )}
                                 <div className="workbench-submit-estimate" aria-live="polite">
-                                    <span className="workbench-submit-estimate-label">{estimateLabel || "预估可用积分"}</span>
+                                    <span className="workbench-submit-estimate-label">
+                                        <FGPricePreview config={composerConfig} model={selectedModel} mode={capability} requirements={quoteRequirements} />
+                                        {creditsEnabled && resolveModelChannel(config, selectedModel).scope !== "system" ? estimateLabel : null}
+                                    </span>
                                     {selectedModel ? (
                                         <span className="workbench-submit-estimate-model">使用 {modelDisplayName(config, selectedModel)}</span>
                                     ) : null}
