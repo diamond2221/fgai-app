@@ -1167,10 +1167,11 @@ async function saveRemoteUserDataBatch(uploaded: Map<string, string>, options: {
             const base = acknowledgedProjects.get(source.id);
             const prepared = await ensureRemoteResourceReferences(current, uploaded, onMediaUploaded);
             const pendingJournal = pendingCanvasMutations.get(source.id);
-            let preparedForMutation = prepared;
-            let savedRevision: number;
+            let preparedForMutation = current;
+            let savedRevision: number | undefined;
+            let remoteSnapshot: CanvasProject | undefined;
             if (pendingJournal) {
-                preparedForMutation = pendingJournal.prepared;
+                preparedForMutation = sameCanvasContent(prepared, pendingJournal.prepared) ? current : pendingJournal.prepared;
                 useSyncProgressStore.getState().setProjectProgress(source.id, { phase: "saving", message: "正在重放未确认的画布操作" });
                 const response = await applyRemoteCanvasOperations(source.id, pendingJournal.request);
                 savedRevision = Number(response.project.revision);
@@ -1179,14 +1180,8 @@ async function saveRemoteUserDataBatch(uploaded: Map<string, string>, options: {
             } else {
                 const operations = buildCanvasOperations(base, prepared);
                 if (!operations.length) {
-                    acknowledgedProjects.set(source.id, { ...prepared, revision: current.revision, remoteContentHash: await canvasContentHash(prepared) });
-                    verifiedProjects.add(source.id);
-                    useSyncProgressStore.getState().setProjectProgress(source.id, {
-                        phase: "done", cloudRevision: Number(current.revision), pendingChanges: 0,
-                        errorKind: undefined, message: "已保存到云端",
-                    });
-                    continue;
-                }
+                    remoteSnapshot = { ...prepared, revision: current.revision };
+                } else {
                 const request: CanvasOperationsRequest = {
                     mutationId: newCanvasMutationId(),
                     ...(base ? { baseRevision: base.revision } : {}),
@@ -1199,9 +1194,10 @@ async function saveRemoteUserDataBatch(uploaded: Map<string, string>, options: {
                 savedRevision = Number(response.project.revision);
                 pendingCanvasMutations.delete(source.id);
                 await persistPendingCanvasMutationJournal();
+                }
             }
-            if (!Number.isSafeInteger(savedRevision)) throw new Error("服务端未返回有效画布版本");
-            const remote = await restoreRemoteTextNodeContents((await getRemoteCanvasProject(source.id)).project);
+            if (!remoteSnapshot && !Number.isSafeInteger(savedRevision)) throw new Error("服务端未返回有效画布版本");
+            const remote = remoteSnapshot ?? await restoreRemoteTextNodeContents((await getRemoteCanvasProject(source.id)).project);
             const latest = useCanvasStore.getState().openProject(source.id);
             if (!latest) throw new Error("画布已关闭，停止提交操作");
             const remoteHash = await canvasContentHash(remote);

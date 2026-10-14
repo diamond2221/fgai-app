@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.8";
+export const CURRENT_RELEASE_VERSION = "1.3.9";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,16 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月14日",
+        items: [
+            { type: "新增", content: "首页精选灵感增加可拖动、可进入内部的三维星球画廊；灵感库保留独立入口，并可切换网格与星球漫游，分类筛选继续可用。" },
+            { type: "修复", content: "兼容上游灵感封面的相对缩略图地址，恢复被清空的作品预览；缓存内容保留原作者、提示词和出处。" },
+            { type: "优化", content: "星球视图支持暂停旋转、按名称浏览与低性能设备回退，离屏停止渲染并释放图形资源。" },
+            { type: "更新", content: "选择同步图片参数设置顺序和云端空操作收尾修复，保留FG独立首页、灵感库和模型计费规则。" },
+        ],
+    },
+    {
+        version: "1.3.8",
         date: "2026年10月14日",
         items: [
             { type: "优化", content: "项目画风支持选填 1–6 张上传参考图，用于色彩、光影和材质；简化原执行配置，并保留人物身份与场景设定。" },

@@ -147,14 +147,15 @@ export function updateImageParameterSchema(profile: ImageCapabilityConfig, param
     const next = projectImageParameters({ ...profile, size }, parameters);
     const previous = profile.parameters?.find((field) => field.name === "imageResolution")?.values || [];
     const added = next.resolution.supported ? next.resolution.values.filter((tier) => !previous.includes(tier)) : [];
-    return initializeImageRatioDefaults(next, definitions, added);
+    const ratios = parameters.find((field) => field.name === "size")?.values?.filter((value): value is string => typeof value === "string" && /^\d+:\d+$/.test(value)) || [];
+    return initializeImageRatioDefaults(next, definitions, added, ratios.length ? ratios : DEFAULT_IMAGE_RATIOS);
 }
 
-export function initializeImageRatioDefaults(profile: ImageCapabilityConfig, definitions: ImageParameter[], tiers?: string[]): ImageCapabilityConfig {
+export function initializeImageRatioDefaults(profile: ImageCapabilityConfig, definitions: ImageParameter[], tiers?: string[], preferredRatios = DEFAULT_IMAGE_RATIOS): ImageCapabilityConfig {
     const field = profile.parameters?.find((p) => p.name === "size");
     const definition = definitions.find((p) => p.name === "size");
     if (!field || field.enabled === false || !definition) return profile;
-    const ratios = DEFAULT_IMAGE_RATIOS.filter((ratio) => imageParameterAccepts(definition, ratio));
+    const ratios = preferredRatios.filter((ratio) => imageParameterAccepts(definition, ratio));
     if (!ratios.length) return profile;
     if (!profile.resolution.supported && field.encoding !== "pixels" && tiers === undefined) {
         return projectImageParameters(
@@ -168,9 +169,9 @@ export function initializeImageRatioDefaults(profile: ImageCapabilityConfig, def
         .flatMap((tier) =>
             ratios.flatMap((ratio) => {
                 try {
-                    return [imagePresetForRatio(tier, ratio)];
+                    return [{ ...imagePresetForRatio(tier, ratio), ratio }];
                 } catch {
-                    return [];
+                    return [{ tier, ratio, width: 0, height: 0, size: "" }];
                 }
             }),
         );

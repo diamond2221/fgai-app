@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState} from "react";
+import {lazy,Suspense,useEffect,useRef,useState} from "react";
 import {Alert,Button,Input,Pagination,Popover,Select,Spin,Upload,message} from "antd";
 import {ArrowUpRight,Check,Copy,Film,Heart,Image as ImageIcon,Info,Play,Search,Sparkles,FileText,Plus,Download,Upload as UploadIcon} from "lucide-react";
 import {saveAs} from "file-saver";
@@ -9,6 +9,7 @@ import {WorkspaceState} from "@/components/layout/workspace-state";
 import {FGInspirationEditor} from "./fg-inspiration-editor";
 import {useUserStore} from "@/stores/use-user-store";
 import "./fg-inspiration.css";
+const InspirationSphere=lazy(()=>import("@/components/inspiration-sphere").then(module=>({default:module.InspirationSphere})));
 
 type Entry={id:string;title:string;prompt?:string;promptZh?:string;license?:string;description:string;kind:"image"|"video"|"text";cover:string;media:{kind:"image"|"video";url:string}[];tags:string[];author:string;sourceName:string;sourceId:string;sourceUrl:string;model:string};
 type Gallery={items:Entry[];total:number;page:number;pageSize:number;categories:{id:string;name:string;count:number}[];models:string[];favorites:string[];counts:{image:number;video:number;text:number;playableVideo:number};sources:{id:string;name:string;count:number;lastSuccess:string|null;error:string|null}[]};
@@ -26,6 +27,7 @@ export default function FGInspirationPage(){
  const activeAccount=useRef(accountId);activeAccount.current=accountId;
  const detailSequence=useRef(0);
  const [category,setCategory]=useState(""),[model,setModel]=useState("");
+ const [view,setView]=useState("grid");
  const [collection,setCollection]=useState(""),[revision,setRevision]=useState(0),[editorOpen,setEditorOpen]=useState(false),[favoriteBusy,setFavoriteBusy]=useState<string[]>([]),[importing,setImporting]=useState(false),[exporting,setExporting]=useState(false),[promptLanguage,setPromptLanguage]=useState("original");
  const container=useRef<HTMLElement>(null);
  const [toast,toastContext]=message.useMessage();
@@ -77,7 +79,9 @@ export default function FGInspirationPage(){
   {sourceErrors.length>0&&<div className="fg-inspiration-sync-note" role="status"><Info size={14}/><span>{sourceErrors.length} 个来源更新暂缓 · {sourceErrors.some(s=>s.count>0)?"已保留上次成功内容，可继续浏览":"其他来源仍可浏览"}</span><Popover trigger="click" placement="bottomRight" title="来源更新状态" content={<ul className="fg-inspiration-sync-details">{sourceErrors.map(s=><li key={s.id}><strong>{s.name}</strong><span>{s.lastSuccess?`上次成功 ${dayjs(s.lastSuccess).format("MM/DD HH:mm")} · 已保留 ${s.count} 条`:"尚未完成首次同步"}</span></li>)}</ul>}><Button type="text" size="small">查看详情</Button></Popover></div>}
   {error&&<Alert className="fg-inspiration-error" type="error" showIcon title={error}/>}
   <Spin spinning={busy}>
-   <section className="fg-inspiration-grid" aria-label={kind==="image"?"图片灵感作品":"视频灵感作品"}>
+   <div style={{display:"flex",gap:8,marginBottom:16}} role="group" aria-label="灵感浏览方式"><Button aria-pressed={view==="grid"} type={view==="grid"?"primary":"default"} onClick={()=>setView("grid")}>作品网格</Button><Button disabled={kind==="text"} aria-pressed={view==="sphere"} type={view==="sphere"?"primary":"default"} onClick={()=>setView("sphere")}>星球漫游</Button></div>
+   {view==="sphere"&&kind!=="text"&&data?<Suspense fallback={<Spin/>}><InspirationSphere items={data.items} onSelect={item=>{const entry=data.items.find(e=>e.id===item.id);if(entry)void open(entry);}}/></Suspense>:null}
+   <section className="fg-inspiration-grid" style={view==="sphere"&&kind!=="text"?{marginTop:24}:undefined} aria-label={kind==="image"?"图片灵感作品":"视频灵感作品"}>
     {data?.items.map((item,index)=><article className="fg-inspiration-card" key={item.id}><button type="button" className="fg-inspiration-card-preview" onClick={()=>void open(item)} aria-label={`查看 ${item.title} 的提示词`}><Preview item={item}/><span className="fg-inspiration-card-index">{String((page-1)*36+index+1).padStart(3,"0")}</span>{item.media.some(m=>m.kind==="video")&&<span className="fg-inspiration-play"><Play fill="currentColor" size={20}/></span>}<span className="fg-inspiration-card-action">查看提示词 <ArrowUpRight size={16}/></span></button><div className="fg-inspiration-card-caption"><button type="button" onClick={()=>void open(item)}>{item.title}</button><span>{item.model}</span></div><div className="fg-inspiration-card-source"><span>{item.sourceName}{item.kind==="video"&&!item.media.some(m=>m.kind==="video")?" · 封面参考":""}</span><Button type="text" size="small" aria-label={`${data.favorites.includes(item.id)?"取消收藏":"收藏"} ${item.title}`} aria-pressed={data.favorites.includes(item.id)} loading={favoriteBusy.includes(item.id)} icon={<Heart size={15} fill={data.favorites.includes(item.id)?"currentColor":"none"}/>} onClick={()=>void favorite(item.id)}/></div></article>)}
    </section>
    {!busy&&!data?.items.length&&!error&&<WorkspaceState title="这个分类暂时没有作品" description="试试其他来源或关键词"/>}

@@ -19,6 +19,7 @@ export const inspirationCategories=[
 export function categoriesFor(item){const text=[item.title,item.description,...item.tags].join(' ');return [...new Set([...(item.category?[item.category]:[]),...inspirationCategories.filter(c=>c.pattern.test(text)).map(c=>c.id)])];}
 export const refreshInterval=30*60*1000;
 const bundled=JSON.parse(readFileSync(new URL('./fg-inspiration-seed.json',import.meta.url),'utf8'));
+const bundledCovers=new Map(catalogSources.flatMap(source=>bundled.catalogs[source.id]?normalizeCatalog(bundled.catalogs[source.id],source):[]).filter(item=>item.cover).map(item=>[item.id,item]));
 const textTemplates=bundled.text.map(e=>({id:createHash('sha256').update('curated-text\0'+e.title).digest('hex').slice(0,24),title:e.title,prompt:e.prompt,description:e.description||'',kind:'text',cover:'',media:[],playable:false,tags:e.tags||[],author:e.credit||'',sourceId:'curated-text',sourceName:e.sourceInfo.label,sourceUrl:e.sourceUrl||e.sourceInfo.repository||'',license:e.sourceInfo.license||'原创',model:'文本模板',updatedAt:''}));
 const publicURL=value=>{try{const u=new URL(promptImageOriginalUrl(value)||value);return u.protocol==='https:'&&!u.username&&!u.password&&!u.port?u.href:'';}catch{return '';}};
 export function normalizeInspiration(items,source){
@@ -113,7 +114,7 @@ export async function inspirationRoute(req,res,{pool,actor,path}){
  // remains in the video section before the next source refresh completes.
  const allEntries=rows.flatMap(r=>{
   const source=inspirationSources.find(s=>s.id===r.id);
-  return r.entries.map(e=>({...e,kind:source?.kind==='video'?'video':e.kind,playable:e.media.some(m=>m.kind==='video')}));
+  return r.entries.map(e=>{const fallback=!e.cover?bundledCovers.get(e.id):undefined;return {...e,...(fallback?{cover:fallback.cover,media:fallback.media}:{}),kind:source?.kind==='video'?'video':e.kind,playable:e.media.some(m=>m.kind==='video')};});
  });
  const personal=await personalInspirationState(pool,actor.id);
  allEntries.unshift(...await sharedPersonalInspirations(pool),...textTemplates);

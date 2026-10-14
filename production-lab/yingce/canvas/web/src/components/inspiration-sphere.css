@@ -1,0 +1,113 @@
+.fg-sphere {
+    position: relative;
+    isolation: isolate;
+    min-height: 580px;
+    overflow: hidden;
+    border: 1px solid var(--workspace-border, #dfe1d8);
+    border-radius: 24px;
+    background: var(--workspace-surface, #f6f6ef);
+    color: var(--workspace-text, #222b20);
+}
+.fg-sphere-heading {
+    position: absolute;
+    z-index: 1;
+    top: 28px;
+    left: 32px;
+    pointer-events: none;
+}
+.fg-sphere-heading > span {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: #6b7c54;
+}
+.fg-sphere-heading h2 {
+    font-size: clamp(22px, 3vw, 38px);
+    font-weight: 550;
+    margin: 8px 0;
+}
+.fg-sphere-heading p {
+    font-size: 12px;
+    opacity: 0.6;
+}
+.fg-sphere-stage {
+    height: 580px;
+    touch-action: none;
+}
+.fg-sphere-stage canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+.fg-sphere-caption {
+    position: absolute;
+    bottom: 64px;
+    left: 32px;
+    pointer-events: none;
+    display: grid;
+    gap: 5px;
+    max-width: 70%;
+    text-shadow: 0 1px 12px var(--workspace-surface, #fff);
+}
+.fg-sphere-caption strong {
+    font-size: 15px;
+}
+.fg-sphere-caption span {
+    font-size: 11px;
+    opacity: 0.6;
+}
+.fg-sphere-pause {
+    position: absolute;
+    bottom: 60px;
+    right: 24px;
+}
+.fg-sphere-accessible {
+    position: relative;
+    padding: 12px 24px;
+    font-size: 12px;
+    border-top: 1px solid var(--workspace-border, #dfe1d8);
+}
+.fg-sphere-accessible summary {
+    cursor: pointer;
+}
+.fg-sphere-accessible > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 0;
+}
+.fg-sphere-accessible button {
+    padding: 5px 10px;
+    border: 1px solid var(--workspace-border, #ddd);
+    border-radius: 8px;
+}
+.fg-sphere-fallback {
+    min-height: 400px;
+    display: grid;
+    place-items: center;
+    padding: 120px 30px;
+    text-align: center;
+}
+.fg-sphere.is-compact {
+    min-height: 400px;
+}
+.fg-sphere.is-compact .fg-sphere-stage {
+    height: 400px;
+}
+@media (max-width: 640px) {
+    .fg-sphere,
+    .fg-sphere-stage {
+        min-height: 440px;
+        height: auto;
+    }
+    .fg-sphere-stage {
+        height: 440px;
+    }
+    .fg-sphere-heading {
+        top: 20px;
+        left: 20px;
+    }
+    .fg-sphere-caption {
+        left: 20px;
+        max-width: 60%;
+    }
+}
