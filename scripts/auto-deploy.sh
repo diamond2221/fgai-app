@@ -442,11 +442,24 @@ reload_nginx() {
   local nginx_container
   local expected_config_hash
   local mounted_config_hash
+  local expected_config_bytes
+  local mounted_config_bytes
   local attempt
 
   nginx_container="$(compose ps -q nginx 2>/dev/null || true)"
   [[ -n "$nginx_container" ]] || return 0
   expected_config_hash="$(shasum -a 256 "$PROJECT_ROOT/docker/nginx/default.conf" | awk '{print $1}')"
+  expected_config_bytes="$(wc -c < "$PROJECT_ROOT/docker/nginx/default.conf" | tr -d '[:space:]')"
+  mounted_config_hash="$(compose exec -T nginx sha256sum /etc/nginx/conf.d/default.conf 2>/dev/null | awk '{print $1}' || true)"
+  mounted_config_bytes="$(compose exec -T nginx stat -c %s /etc/nginx/conf.d/default.conf 2>/dev/null || true)"
+  # Docker Desktop can retain an old bind-mount st_size while reads return new bytes.
+  # Nginx reads that cached size and loses the trailing braces; renew only its app container.
+  if [[ "$mounted_config_hash" == "$expected_config_hash" ]] \
+    && [[ "$mounted_config_bytes" =~ ^[0-9]+$ ]] \
+    && [[ "$mounted_config_bytes" != "$expected_config_bytes" ]]; then
+    log "Auto deploy: refreshing Nginx application mount after file size metadata drift"
+    compose up -d --no-deps --no-build --force-recreate nginx || return 1
+  fi
   # A bind-mounted Nginx config needs an explicit reload after a repository update.
   # bind-mounted Nginx 配置随仓库更新后不会自动生效，必须显式 reload。
   log "Auto deploy: validating and reloading Nginx"
