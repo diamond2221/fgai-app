@@ -1,5 +1,7 @@
 const tokenPattern = /^[0-9a-f]{64}$/i;
-const managedAuth = /^\/api\/auth\/(?:login|register|logout|password|email|sms|linuxdo|verification)(?:[/-]|$)/;
+// FG accounts, passwords, mailboxes and OAuth bindings are owned by the FG platform,
+// including the upstream personal-profile security endpoints.
+const managedAuth = /^\/api\/auth\/(?:login|register|logout|password|email|sms|linuxdo|verification|profile\/(?:password|email|linuxdo))(?:[/-]|$)/;
 const commercial = /^\/api\/(?:wallet|payments|payment|admin\/(?:payments|credit-policy|credit-operations|redemption-codes|redeem-codes|redeem-batches|credit-ledger|billing-orders|settings\/credits))(?:[/-]|$)/;
 const hopHeaders = new Set(['connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade', 'proxy-authorization', 'proxy-authenticate']);
 

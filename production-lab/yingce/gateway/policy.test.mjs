@@ -34,6 +34,12 @@ test('upstream authentication cannot be reached via encoded paths or an absolute
   for (const path of ['//evil.example/api', 'https://evil.example/', '/api/auth%2flogin', '/api/auth/%256cogin']) {
     assert.throws(() => requestPath(path, origin));
   }
+  for (const path of ['/api/auth/profile/password', '/api/auth/profile/email-code', '/api/auth/profile/email', '/api/auth/profile/linuxdo/start']) {
+    assert.equal(requestPath(path, origin).managedAuth, true);
+  }
+  for (const path of ['/api/auth/profile', '/api/auth/profile/avatar']) {
+    assert.equal(requestPath(path, origin).managedAuth, false);
+  }
   assert.equal(requestPath('/api/auth/session', origin).managedAuth, false);
   assert.equal(requestPath('/api/canvas-projects?q=abc', origin).url.search, '?q=abc');
 });

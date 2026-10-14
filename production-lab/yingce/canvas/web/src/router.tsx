@@ -22,6 +22,7 @@ const LogicalModelsPage = lazy(() => import("@/pages/admin/logical-models/logica
 const AdminPluginsPage = lazy(() => import("@/pages/admin/plugins/plugins-page"));
 const SkillCurationPage = lazy(() => import("@/pages/admin/skill-curation-page"));
 const LogsPage = lazy(() => import("@/pages/admin/logs/logs-page"));
+const LoginLogsPage = lazy(() => import("@/pages/admin/login-logs/login-logs-page"));
 const RuntimePolicySettingsPage = lazy(() => import("@/pages/admin/settings/runtime-policy-settings-page"));
 const AppearanceSettingsPage = lazy(() => import("@/pages/admin/settings/appearance-settings-page"));
 const DrawingEngineSettingsPage = lazy(() => import("@/pages/admin/settings/drawing-engine-settings-page"));
@@ -29,6 +30,7 @@ const StorageSettingsPage = lazy(() => import("@/pages/admin/settings/storage-se
 const ArkPrivateAssetsSettingsPage = lazy(() => import("@/pages/admin/settings/ark-private-assets-settings-page"));
 const ResponseInterceptionSettingsPage = lazy(() => import("@/pages/admin/settings/response-interception-settings-page"));
 const ThirdPartySettingsPage = lazy(() => import("@/pages/admin/settings/libtv-settings-page"));
+const WorkbenchToolsPage = lazy(() => import("@/pages/admin/workbench-tools/workbench-tools-page"));
 const SystemUpdatePage = lazy(() => import("@/pages/admin/settings/fg-release-page"));
 const SystemPerformancePage = lazy(() => import("@/pages/admin/settings/system-performance-page"));
 const FGProductionPage = lazy(() => import("@/pages/fg-production"));
@@ -44,6 +46,8 @@ const CanvasPage = lazy(loadCanvasPage);
 const CanvasProjectPage = lazy(loadCanvasProjectPage);
 const SharedCanvasPage = lazy(() => import("@/pages/canvas/shared"));
 const CreatePage = lazy(loadCreatePage);
+const ImageWorkbenchPage = lazy(() => import("@/pages/workbench/image-workbench-route"));
+const VideoWorkbenchPage = lazy(() => import("@/pages/workbench/video-workbench-page"));
 const InspirationsPage = lazy(loadInspirationsPage);
 const NotFound = lazy(() => import("@/pages/not-found"));
 const SkillsPage = lazy(() => import("@/pages/skills"));
@@ -113,6 +117,22 @@ export const router = createBrowserRouter([
             { path: "/fg-audio-tools", element: <RequireAuth>{deferred(<FGAudioToolsPage />)}</RequireAuth> },
             { path: "/fg-inspiration", element: <RequireAuth>{deferred(<FGInspirationPage />)}</RequireAuth> },
             { path: "/fg-finance", element: <RequireAuth>{deferred(<FGFinancePage />)}</RequireAuth> },
+            {
+                path: "/toolbox/image",
+                element: (
+                    <RequireAuth>
+                        <RequireFeature feature="imageWorkbenchEnabled">{deferred(<ImageWorkbenchPage />)}</RequireFeature>
+                    </RequireAuth>
+                ),
+            },
+            {
+                path: "/toolbox/video",
+                element: (
+                    <RequireAuth>
+                        <RequireFeature feature="videoWorkbenchEnabled">{deferred(<VideoWorkbenchPage />)}</RequireFeature>
+                    </RequireAuth>
+                ),
+            },
             { path: "/inspirations", element: <RequireAuth>{deferred(<InspirationsPage />)}</RequireAuth> },
             {
                 path: "/tasks",
@@ -187,16 +207,32 @@ export const router = createBrowserRouter([
                 ),
             },
             { path: "/canvas", element: <RequireAuth>{deferred(<CanvasPage />)}</RequireAuth> },
-            { path: "/canvas/:id", element: <RequireAuth><CanvasProjectPage /></RequireAuth> },
+            {
+                path: "/canvas/:id",
+                element: (
+                    <RequireAuth>
+                        <CanvasProjectPage />
+                    </RequireAuth>
+                ),
+            },
             {
                 path: "/admin",
                 element: <RequireAuth>{deferred(<AdminPage />)}</RequireAuth>,
                 children: [
                     { index: true, element: <AnalyticsPage /> },
                     { path: "users", element: <UsersPage /> },
+                    { path: "login-logs", element: <LoginLogsPage /> },
                     { path: "channels", element: <ChannelsPage /> },
-                    { path: "models", element: <RequireFeature feature="frontendModelsEnabled"><LogicalModelsPage /></RequireFeature> },
+                    {
+                        path: "models",
+                        element: (
+                            <RequireFeature feature="frontendModelsEnabled">
+                                <LogicalModelsPage />
+                            </RequireFeature>
+                        ),
+                    },
                     { path: "plugins", element: <AdminPluginsPage /> },
+                    { path: "workbench-tools", element: <WorkbenchToolsPage /> },
                     { path: "skill-curation", element: <SkillCurationPage /> },
                     { path: "payments", element: <Navigate to="/admin" replace /> },
                     { path: "prompt-templates", element: <StoryboardPromptsPage /> },
