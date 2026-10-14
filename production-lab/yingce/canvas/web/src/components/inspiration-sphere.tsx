@@ -3,6 +3,7 @@ import { Button } from "antd";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import "./inspiration-sphere.css";
+import { bundledInspirationCover } from "@/lib/inspiration-cover";
 
 export type SphereEntry = { id: string; title: string; cover: string; sourceName?: string };
 export function InspirationSphere({ items, onSelect, compact = false }: { items: SphereEntry[]; onSelect: (item: SphereEntry) => void; compact?: boolean }) {
@@ -14,7 +15,11 @@ export function InspirationSphere({ items, onSelect, compact = false }: { items:
     const [paused, setPaused] = useState(false);
     const pausedRef = useRef(false);
     pausedRef.current = paused;
-    const entries = items.filter((item) => item.cover).slice(0, 72);
+    const available = items.filter((item) => item.cover).map((item) => ({ ...item, cover: bundledInspirationCover(item.cover, import.meta.env.BASE_URL) }));
+    const bundled = available.filter((item) => !item.cover.startsWith("https:"));
+    // Prefer the locally shipped selection for a dependable first view; smaller or personal
+    // collections can still use their external covers through the authenticated proxy.
+    const entries = (bundled.length >= 8 ? bundled : available).slice(0, 72);
     const key = entries.map((item) => item.id + item.cover).join("|");
     useEffect(() => {
         const element = host.current;

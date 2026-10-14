@@ -27,7 +27,7 @@ export async function createFileUploadPlaceholder(id: string, file: File, positi
     if (type === CanvasNodeType.Image) return createImageUploadPlaceholder(id, file, position, await readUploadImageSize(file));
     const size = type === CanvasNodeType.Video ? fitNodeSize(...await readUploadVideoSize(file)) : NODE_DEFAULT_SIZE[type];
     return {
-        id, type, title: file.name, ...size,
+        id, type, ...size, title: file.name,
         position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
         metadata: { fileUpload: "uploading", bytes: file.size, mimeType: file.type },
     } satisfies CanvasNodeData;

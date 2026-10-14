@@ -9,16 +9,17 @@ import {WorkspaceState} from "@/components/layout/workspace-state";
 import {FGInspirationEditor} from "./fg-inspiration-editor";
 import {useUserStore} from "@/stores/use-user-store";
 import "./fg-inspiration.css";
+import {bundledInspirationCover} from "@/lib/inspiration-cover";
 const InspirationSphere=lazy(()=>import("@/components/inspiration-sphere").then(module=>({default:module.InspirationSphere})));
 
 type Entry={id:string;title:string;prompt?:string;promptZh?:string;license?:string;description:string;kind:"image"|"video"|"text";cover:string;media:{kind:"image"|"video";url:string}[];tags:string[];author:string;sourceName:string;sourceId:string;sourceUrl:string;model:string};
 type Gallery={items:Entry[];total:number;page:number;pageSize:number;categories:{id:string;name:string;count:number}[];models:string[];favorites:string[];counts:{image:number;video:number;text:number;playableVideo:number};sources:{id:string;name:string;count:number;lastSuccess:string|null;error:string|null}[]};
 function Preview({item,large=false}:{item:Entry;large?:boolean}){
- const [failed,setFailed]=useState(false);const video=item.media.find(m=>m.kind==="video");
+ const [failed,setFailed]=useState(false);const video=item.media.find(m=>m.kind==="video");const cover=bundledInspirationCover(item.cover,import.meta.env.BASE_URL);
  useEffect(()=>setFailed(false),[item.id]);
  if(item.kind==="text")return <div className="fg-inspiration-text-preview"><FileText size={28}/><strong>{item.title}</strong><p>{item.description}</p></div>;
- return large&&video?<video controls playsInline preload="metadata" src={video.url} poster={item.cover} className="fg-inspiration-detail-media"/>:
-  failed||!item.cover?<div className="fg-inspiration-unavailable"><ImageIcon size={30}/><span>预览暂不可用</span></div>:<img src={item.cover} alt={item.title} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>;
+ return large&&video?<video controls playsInline preload="metadata" src={video.url} poster={cover} className="fg-inspiration-detail-media"/>:
+  failed||!cover?<div className="fg-inspiration-unavailable"><ImageIcon size={30}/><span>预览暂不可用</span></div>:<img src={cover} alt={item.title} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>;
 }
 export default function FGInspirationPage(){
  const accountId=useUserStore(state=>state.user?.id);
