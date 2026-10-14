@@ -7,7 +7,9 @@ import {capabilities} from './fg-model-capabilities.mjs';
 import {withNativeAdmin} from './native-admin.mjs';
 import {profileMatches} from './fg-model-profile-normalization.mjs';
 
-const keys=JSON.parse(await fs.readFile(new URL('./model-specs.json',import.meta.url),'utf8')).filter(s=>s.id!=='gemini-3.5-pro').map(s=>s.id);
+const requested=process.env.FG_CAPABILITY_MODEL_KEYS?.split(',').filter(Boolean);
+const keys=JSON.parse(await fs.readFile(new URL('./model-specs.json',import.meta.url),'utf8')).filter(s=>s.id!=='gemini-3.5-pro'&&(!requested||requested.includes(s.id))).map(s=>s.id);
+if(requested&&(!keys.length||keys.length!==new Set(requested).size))throw new Error('Unknown targeted model contract');
 // Saving a capability increments priceVersion/updatedAt even with unchanged rates.
 const priceContract=tiers=>(tiers||[]).map(t=>Object.fromEntries(['resolution','videoSeconds','providerModelKey','billingMode','unitPriceMicrocredits','inputTokenPriceMicrocredits','outputTokenPriceMicrocredits','cachedTokenPriceMicrocredits','priceConfigured','enabled','costPricing'].map(k=>[k,t[k]])));
 const specs=JSON.parse(await fs.readFile(new URL('./model-specs.json',import.meta.url),'utf8'));
