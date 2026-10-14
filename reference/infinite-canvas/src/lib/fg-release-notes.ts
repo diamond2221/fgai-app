@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.9";
+export const CURRENT_RELEASE_VERSION = "1.3.10";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,16 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月14日",
+        items: [
+            { type: "新增", content: "超级创作首页整合灵感大厅、最近画布和历史对话；作品默认以网格展示，收藏、分类、搜索和提示词带入继续可用。" },
+            { type: "优化", content: "星球漫游改为可选的密集环绕图片空间，支持全屏、拖动旋转、滚轮进入与逐张点击；Esc退出全屏，小集合重复铺排但不虚增作品数量。" },
+            { type: "修复", content: "灵感缩略图优先从本站加载，上传音频保留文件名称，引用声音时更容易区分。" },
+            { type: "更新", content: "复查上游v1.6.8.3，采用最近画布功能并保留已同步的参数顺序和云端同步修复。" },
+        ],
+    },
+    {
+        version: "1.3.9",
         date: "2026年10月14日",
         items: [
             { type: "新增", content: "首页精选灵感增加可拖动、可进入内部的三维星球画廊；灵感库保留独立入口，并可切换网格与星球漫游，分类筛选继续可用。" },

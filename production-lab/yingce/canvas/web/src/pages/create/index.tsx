@@ -33,8 +33,10 @@ import { creationAttachmentFromAsset, creationAttachmentFromAudio, creationAttac
 import { defaultCreationMode, modeLabels, type CreationConversation, type CreationMessage, type CreationMode, type CreationRetryContext, type CreationSettings, type CreationShotRailEntry, type CreationStatus } from "./creation-types";
 import { attachCreationTaskContexts, completedCreationGenerationTask, conversationTimestamp, creationShotRail, creationVideoShotOrdinal, isImageAttachment, isVideoAttachment, materializeCreationTaskResults, newConversation, newMessage, reconcileCreationTaskMessages } from "./creation-conversations";
 import { CreationComposer, CreationEmptySuggest, CreationHistoryDrawer, CreationMessageView, CreationModeTabs, CreationWorkspaceToolbar, creationAssetCategoryLabels } from "./creation-workspace";
-import { CreationInspirationOrbit } from "./creation-inspiration-orbit";
-import { CreationInspirationTunnel } from "./creation-inspiration-tunnel";
+import { CreationRecentCanvases } from "./creation-recent-canvases";
+const FGInspirationPage = lazy(() => import("@/pages/fg-inspiration"));
+import "./creation-home-hub.css";
+
 import { declaredInspirationSources } from "@/lib/inspirations/catalog";
 import { CreationAgentEntry } from "./creation-agent-entry";
 import { GlassAgent, Magnet } from "@/components/ui/fg-glass-effects";
@@ -1121,10 +1123,6 @@ export default function CreatePage() {
                     <h1>和{brandName}聊聊创作想法</h1>
                     <p>从一个画面、一个角色或一句话开始，继续你的创作。</p>
                 </div>
-                {mode === "text" ? <CreationInspirationTunnel mode={mode} onStartPrompt={(nextMode, prompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(prompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}/> : <CreationInspirationOrbit
-                    mode={mode}
-                    onStartPrompt={(nextMode, prompt) => { setAgentMode(false); selectMode(nextMode); setPrompt(prompt); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}
-                />}
                 <section ref={launchpadRef} className="creation-launchpad" aria-label="开始创作">
                     <div className={cn("creation-composer-stage is-home-mode", agentMode && "is-agent-mode")}>
                         <CreationModeTabs mode={mode} agentActive={agentMode} onAgentSelect={() => setAgentMode(true)} onModeChange={(next) => { setAgentMode(false); selectMode(next); }} />
@@ -1135,6 +1133,14 @@ export default function CreatePage() {
                         onOpenLibrary={() => { setAgentMode(false); selectMode("image"); setLibraryOpen(true); }}
                     />
                 </section>
+                <div className="creation-home-hub">
+                    <CreationRecentCanvases onRequireLogin={() => setLoginDialogOpen(true)} />
+                    <section className="creation-recent-chats" aria-labelledby="recent-chats-title">
+                        <header className="creation-section-heading"><h2 id="recent-chats-title"><History size={18}/>历史对话</h2><button type="button" onClick={() => setHistoryOpen(true)}>查看全部 ↗</button></header>
+                        <div className="creation-chat-strip">{historyConversations.slice(0,4).map((conversation) => <button type="button" key={conversation.id} onClick={() => selectConversation(conversation)}><strong>{conversation.title || "新创作"}</strong><span>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</span></button>)}{!historyConversations.length ? <p>你的创作对话会保存在这里，随时继续。</p> : null}</div>
+                    </section>
+                    <Suspense fallback={<Spin/>}><FGInspirationPage embedded onUsePrompt={(nextMode, value) => { setAgentMode(false); selectMode(nextMode); setPrompt(value); threadScrollRef.current?.scrollTo({top:0,behavior:reducedMotion ? "auto" : "smooth"}); window.requestAnimationFrame(() => composerFocusRef.current?.focus()); }}/></Suspense>
+                </div>
                 {inspirationSourcesVisible ? <div className="creation-inspiration-credit">
                     <details>
                         <summary>素材来源</summary>

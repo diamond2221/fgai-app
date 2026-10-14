@@ -51,7 +51,6 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
                 { ...toolItem("projects", "/advertising"), id: "fg-advertising", title: "广告工作台" },
                 { ...toolItem("create", "/creator-app"), id: "fg-creator", title: "超级综合工作台" },
                 { ...toolItem("projects", "/arcreel"), id: "fg-arcreel", title: "超级小说转视频" },
-                { ...toolItem("assets", "/fg-inspiration"), id: "fg-inspiration", title: "超级灵感库" },
                 { ...toolItem("canvas", "/canvas"), title: "超级自由画布" },
             ],
         },

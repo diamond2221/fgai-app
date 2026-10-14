@@ -8,6 +8,15 @@
     background: var(--workspace-surface, #f6f6ef);
     color: var(--workspace-text, #222b20);
 }
+.fg-sphere.is-fullscreen {position:fixed;inset:0;z-index:1400;border-radius:0;border:0;box-sizing:border-box;height:100dvh;min-height:100dvh;background:#edf0f7;}
+.fg-sphere.is-fullscreen .fg-sphere-stage {height:100dvh;}
+.fg-sphere.is-fullscreen .fg-sphere-accessible {position:absolute;bottom:0;max-width:80%;background:rgba(255,255,255,.9);border-radius:12px;}
+.fg-sphere-fullscreen {position:absolute;top:18px;right:18px;z-index:3;}
+.fg-sphere-topline {position:absolute;top:18px;left:18px;z-index:2;background:rgba(255,255,255,.8);padding:7px 12px;border-radius:9px;font-size:12px;}
+.fg-sphere-center {position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:140px;height:140px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:20px;pointer-events:none;background:radial-gradient(circle at 35% 25%,#fff 0%,#f8f8fc 65%,#dce0eb 100%);box-shadow:0 8px 36px #6d78a431,0 0 0 8px #fff4,0 0 0 9px #b9c0e64d;z-index:2;color:#243047;}
+.fg-sphere-center strong {font-size:15px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.fg-sphere-center span {font-size:11px;color:#78819d;}
+.fg-sphere-help {position:absolute;bottom:64px;left:50%;transform:translateX(-50%);background:#ffffffdd;border-radius:9px;padding:8px 14px;font-size:11px;white-space:nowrap;pointer-events:none;z-index:2;}
 .fg-sphere-heading {
     position: absolute;
     z-index: 1;

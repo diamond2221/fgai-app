@@ -21,7 +21,7 @@ function Preview({item,large=false}:{item:Entry;large?:boolean}){
  return large&&video?<video controls playsInline preload="metadata" src={video.url} poster={cover} className="fg-inspiration-detail-media"/>:
   failed||!cover?<div className="fg-inspiration-unavailable"><ImageIcon size={30}/><span>预览暂不可用</span></div>:<img src={cover} alt={item.title} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>;
 }
-export default function FGInspirationPage(){
+export default function FGInspirationPage({embedded=false,onUsePrompt}:{embedded?:boolean;onUsePrompt?:(mode:"image"|"video"|"text",prompt:string)=>void}={}){
  const accountId=useUserStore(state=>state.user?.id);
  const [kind,setKind]=useState("image"),[source,setSource]=useState(""),[query,setQuery]=useState(""),[search,setSearch]=useState(""),[page,setPage]=useState(1),[gallery,setData]=useState<Gallery|null>(null),[dataAccount,setDataAccount]=useState<string|undefined>(),[busy,setBusy]=useState(true),[error,setError]=useState(""),[selection,setSelected]=useState<Entry|null>(null),[selectionAccount,setSelectionAccount]=useState<string|undefined>(),[detailBusy,setDetailBusy]=useState(false),[copied,setCopied]=useState(false);
  const data=dataAccount===accountId?gallery:null,selected=selectionAccount===accountId?selection:null;
@@ -29,6 +29,7 @@ export default function FGInspirationPage(){
  const detailSequence=useRef(0);
  const [category,setCategory]=useState(""),[model,setModel]=useState("");
  const [view,setView]=useState("grid");
+ const [sphereItems,setSphereItems]=useState<Entry[]>([]),[sphereBusy,setSphereBusy]=useState(false);
  const [collection,setCollection]=useState(""),[revision,setRevision]=useState(0),[editorOpen,setEditorOpen]=useState(false),[favoriteBusy,setFavoriteBusy]=useState<string[]>([]),[importing,setImporting]=useState(false),[exporting,setExporting]=useState(false),[promptLanguage,setPromptLanguage]=useState("original");
  const container=useRef<HTMLElement>(null);
  const [toast,toastContext]=message.useMessage();
@@ -41,6 +42,16 @@ export default function FGInspirationPage(){
   void http.get<Gallery>("/fg/inspiration?"+params,{signal:controller.signal}).then(value=>{if(alive&&activeAccount.current===accountId){setData(value);setDataAccount(accountId);}}).catch(e=>{if(alive)setError(e.message||"灵感内容加载失败");}).finally(()=>{if(alive)setBusy(false);});
   return()=>{alive=false;controller.abort();};
  },[kind,source,category,model,collection,search,page,revision,accountId]);
+ useEffect(()=>{
+  setSphereItems([]);
+  if(view!=="sphere"||kind==="text")return;
+  const controller=new AbortController();setSphereBusy(true);
+  const params=new URLSearchParams({kind,source,category,model,collection,q:search});
+  void Promise.all([1,2,3,4,5,6].map(page=>http.get<Gallery>(`/fg/inspiration?${params}&page=${page}`,{signal:controller.signal}))).then(pages=>{
+   if(!controller.signal.aborted&&activeAccount.current===accountId)setSphereItems([...new Map(pages.flatMap(p=>p.items).map(item=>[item.id,item])).values()]);
+  }).catch(error=>{if(!controller.signal.aborted)setError(error.message||"星球作品读取失败");}).finally(()=>{if(!controller.signal.aborted)setSphereBusy(false);});
+  return()=>controller.abort();
+ },[view,kind,source,category,model,collection,search,revision,accountId]);
  async function open(item:Entry){
   const sequence=++detailSequence.current;setSelectionAccount(accountId);setSelected(item);setCopied(false);setDetailBusy(true);setPromptLanguage("original");
   try{const value=await http.get<Entry>("/fg/inspiration/items/"+item.id);if(sequence===detailSequence.current&&activeAccount.current===accountId)setSelected(current=>current?.id===item.id?value:current);}
@@ -61,11 +72,12 @@ export default function FGInspirationPage(){
  async function exportFile(){setExporting(true);try{const result=await http.get("/fg/inspiration/export");if(activeAccount.current!==accountId)return;saveAs(new Blob([JSON.stringify(result,null,2)],{type:"application/json"}),`FG-我的灵感-${dayjs().format("YYYYMMDD")}.json`);}catch(error){void toast.error(error instanceof Error?error.message:"导出失败");}finally{setExporting(false);}}
  const successes=data?.sources.map(s=>s.lastSuccess).filter((v):v is string=>!!v).sort()||[];
  const sourceErrors=data?.sources.filter(s=>s.error)||[];
- return <main ref={container} className="fg-inspiration">{toastContext}
-  <header className="fg-inspiration-hero">
+ const Container=embedded?"section":"main";
+ return <Container ref={container} className={`fg-inspiration ${embedded?"is-embedded":""}`}>{toastContext}
+  {!embedded?<header className="fg-inspiration-hero">
    <div className="fg-inspiration-kicker"><Sparkles size={14}/><span>FG INSPIRATION / 灵感档案</span><span className="fg-inspiration-live"><i/> 每 30 分钟更新</span></div>
    <div className="fg-inspiration-heading"><h1>下一帧，<br/><span>从这里开始。</span></h1><div><p>浏览出色的画面，拆解它的提示词。<br/>把一个灵感，带进你的下一次创作。</p><div className="fg-inspiration-totals"><strong>{data?.counts.image.toLocaleString()||"—"}<small>图片灵感</small></strong><strong>{data?.counts.video.toLocaleString()||"—"}<small>视频灵感</small></strong><strong>{data?.sources.length.toString().padStart(2,"0")||"—"}<small>精选来源</small></strong></div></div></div>
-  </header>
+  </header>:<header className="creation-section-heading"><h2><Sparkles size={18}/>灵感大厅</h2><span>浏览、收藏，将喜欢的画面带入创作</span></header>}
   <div className="fg-inspiration-library-bar"><div className="fg-inspiration-collections">{[["","全部灵感"],["favorites","我的收藏"],["mine","我的灵感"]].map(([id,label])=><Button key={id} type={collection===id?"primary":"text"} onClick={()=>{setCollection(id);setPage(1);}}>{label}</Button>)}</div><div className="fg-inspiration-library-actions"><Upload accept=".json,application/json" showUploadList={false} beforeUpload={importFile} disabled={importing}><Button icon={<UploadIcon size={14}/>} loading={importing}>导入</Button></Upload><Button icon={<Download size={14}/>} loading={exporting} onClick={()=>void exportFile()}>导出我的灵感</Button><Button type="primary" icon={<Plus size={15}/>} onClick={()=>setEditorOpen(true)}>新建灵感</Button></div></div>
   <section className="fg-inspiration-toolbar" aria-label="筛选灵感">
    <div className="fg-inspiration-tabs" role="tablist" aria-label="灵感类型">{[["image","图片",ImageIcon],["video","视频",Film],["text","文本",FileText]].map(([id,label,Icon])=>{const MediaIcon=Icon as typeof ImageIcon;return <button type="button" role="tab" aria-selected={kind===id} key={String(id)} className={kind===id?"is-active":""} onClick={()=>{setKind(String(id));setCategory("");setModel("");setSource("");setPage(1);}}><MediaIcon size={17}/>{String(label)}<span>{data?.counts[id as "image"|"video"|"text"]||0}</span></button>;})}</div>
@@ -81,8 +93,8 @@ export default function FGInspirationPage(){
   {error&&<Alert className="fg-inspiration-error" type="error" showIcon title={error}/>}
   <Spin spinning={busy}>
    <div style={{display:"flex",gap:8,marginBottom:16}} role="group" aria-label="灵感浏览方式"><Button aria-pressed={view==="grid"} type={view==="grid"?"primary":"default"} onClick={()=>setView("grid")}>作品网格</Button><Button disabled={kind==="text"} aria-pressed={view==="sphere"} type={view==="sphere"?"primary":"default"} onClick={()=>setView("sphere")}>星球漫游</Button></div>
-   {view==="sphere"&&kind!=="text"&&data?<Suspense fallback={<Spin/>}><InspirationSphere items={data.items} onSelect={item=>{const entry=data.items.find(e=>e.id===item.id);if(entry)void open(entry);}}/></Suspense>:null}
-   <section className="fg-inspiration-grid" style={view==="sphere"&&kind!=="text"?{marginTop:24}:undefined} aria-label={kind==="image"?"图片灵感作品":"视频灵感作品"}>
+   {view==="sphere"&&kind!=="text"&&data?<Suspense fallback={<Spin/>}><Spin spinning={sphereBusy}><InspirationSphere items={sphereItems.length?sphereItems:data.items} onSelect={item=>{const entry=[...sphereItems,...data.items].find(e=>e.id===item.id);if(entry)void open(entry);}}/></Spin></Suspense>:null}
+   <section className="fg-inspiration-grid" style={view==="sphere"&&kind!=="text"?{display:"none"}:undefined} aria-label={kind==="image"?"图片灵感作品":"视频灵感作品"}>
     {data?.items.map((item,index)=><article className="fg-inspiration-card" key={item.id}><button type="button" className="fg-inspiration-card-preview" onClick={()=>void open(item)} aria-label={`查看 ${item.title} 的提示词`}><Preview item={item}/><span className="fg-inspiration-card-index">{String((page-1)*36+index+1).padStart(3,"0")}</span>{item.media.some(m=>m.kind==="video")&&<span className="fg-inspiration-play"><Play fill="currentColor" size={20}/></span>}<span className="fg-inspiration-card-action">查看提示词 <ArrowUpRight size={16}/></span></button><div className="fg-inspiration-card-caption"><button type="button" onClick={()=>void open(item)}>{item.title}</button><span>{item.model}</span></div><div className="fg-inspiration-card-source"><span>{item.sourceName}{item.kind==="video"&&!item.media.some(m=>m.kind==="video")?" · 封面参考":""}</span><Button type="text" size="small" aria-label={`${data.favorites.includes(item.id)?"取消收藏":"收藏"} ${item.title}`} aria-pressed={data.favorites.includes(item.id)} loading={favoriteBusy.includes(item.id)} icon={<Heart size={15} fill={data.favorites.includes(item.id)?"currentColor":"none"}/>} onClick={()=>void favorite(item.id)}/></div></article>)}
    </section>
    {!busy&&!data?.items.length&&!error&&<WorkspaceState title="这个分类暂时没有作品" description="试试其他来源或关键词"/>}
@@ -91,7 +103,7 @@ export default function FGInspirationPage(){
   <footer className="fg-inspiration-footer"><span>发现 · 拆解 · 创作</span><span>作品与提示词来自公开来源，原作者及出处保留在详情中。</span></footer>
   <FGInspirationEditor open={editorOpen} onClose={()=>setEditorOpen(false)} onSaved={()=>setRevision(value=>value+1)}/>
   <AppModal open={!!selected} onCancel={()=>setSelected(null)} footer={null} width={1180} title="灵感详情" className="fg-inspiration-modal" destroyOnHidden>
-   {selected&&<div className="fg-inspiration-detail"><div className="fg-inspiration-detail-visual"><Preview item={selected} large/></div><div className="fg-inspiration-detail-copy"><span className="fg-inspiration-kicker">{selected.kind==="video"?"VIDEO":selected.kind==="text"?"TEXT":"IMAGE"} / {selected.model}</span><h2>{selected.title}</h2>{selected.description&&<p>{selected.description}</p>}<div className="fg-inspiration-tags">{selected.tags.map(tag=><span key={tag}>{tag}</span>)}</div><div className="fg-inspiration-prompt-heading"><h3>对应提示词</h3>{selected.promptZh&&<Select aria-label="提示词语言" value={promptLanguage} onChange={value=>{setPromptLanguage(value);setCopied(false);}} options={[{value:"original",label:"原文"},{value:"zh",label:"中文"}]} size="small"/>}<Button icon={copied?<Check size={15}/>:<Copy size={15}/>} disabled={!activePrompt||detailBusy} onClick={()=>void copy()}>{copied?"已复制":"复制提示词"}</Button></div><Spin spinning={detailBusy}><pre>{activePrompt||"正在读取提示词…"}</pre></Spin><div className="fg-inspiration-attribution"><span>{selected.author?`${selected.author} · `:""}{selected.sourceName}</span>{selected.license&&<span>{selected.license}</span>}<p>{selected.kind==="video"?"封面来自原案例；可在上游原页查看原视频。":"配图为原来源示例，不代表本平台生成结果。"}</p></div><div className="fg-inspiration-detail-actions">{selected.sourceUrl&&<Button href={selected.sourceUrl} target="_blank" rel="noreferrer" icon={<ArrowUpRight size={15}/>}>{selected.kind==="video"?"查看原页 / 原视频":"查看上游原页"}</Button>}<Button icon={<Heart size={15} fill={data?.favorites.includes(selected.id)?"currentColor":"none"}/>} loading={favoriteBusy.includes(selected.id)} onClick={()=>void favorite(selected.id)}>{data?.favorites.includes(selected.id)?"已收藏":"收藏灵感"}</Button></div></div></div>}
+   {selected&&<div className="fg-inspiration-detail"><div className="fg-inspiration-detail-visual"><Preview item={selected} large/></div><div className="fg-inspiration-detail-copy"><span className="fg-inspiration-kicker">{selected.kind==="video"?"VIDEO":selected.kind==="text"?"TEXT":"IMAGE"} / {selected.model}</span><h2>{selected.title}</h2>{selected.description&&<p>{selected.description}</p>}<div className="fg-inspiration-tags">{selected.tags.map(tag=><span key={tag}>{tag}</span>)}</div><div className="fg-inspiration-prompt-heading"><h3>对应提示词</h3>{selected.promptZh&&<Select aria-label="提示词语言" value={promptLanguage} onChange={value=>{setPromptLanguage(value);setCopied(false);}} options={[{value:"original",label:"原文"},{value:"zh",label:"中文"}]} size="small"/>}<Button icon={copied?<Check size={15}/>:<Copy size={15}/>} disabled={!activePrompt||detailBusy} onClick={()=>void copy()}>{copied?"已复制":"复制提示词"}</Button></div><Spin spinning={detailBusy}><pre>{activePrompt||"正在读取提示词…"}</pre></Spin><div className="fg-inspiration-attribution"><span>{selected.author?`${selected.author} · `:""}{selected.sourceName}</span>{selected.license&&<span>{selected.license}</span>}<p>{selected.kind==="video"?"封面来自原案例；可在上游原页查看原视频。":"配图为原来源示例，不代表本平台生成结果。"}</p></div><div className="fg-inspiration-detail-actions">{onUsePrompt&&<Button type="primary" disabled={!activePrompt||detailBusy} onClick={()=>{onUsePrompt(selected.kind,activePrompt||"");setSelected(null);}}>带入创作</Button>}{selected.sourceUrl&&<Button href={selected.sourceUrl} target="_blank" rel="noreferrer" icon={<ArrowUpRight size={15}/>}>{selected.kind==="video"?"查看原页 / 原视频":"查看上游原页"}</Button>}<Button icon={<Heart size={15} fill={data?.favorites.includes(selected.id)?"currentColor":"none"}/>} loading={favoriteBusy.includes(selected.id)} onClick={()=>void favorite(selected.id)}>{data?.favorites.includes(selected.id)?"已收藏":"收藏灵感"}</Button></div></div></div>}
   </AppModal>
- </main>;
+ </Container>;
 }
