@@ -2833,14 +2833,14 @@ func TestResolveGenerationStyleExecutionUsesValidatedPromptAssets(t *testing.T) 
 	}
 }
 
-func TestResolveGenerationStyleExecutionStrictPolicyBlocksUnsupportedAsset(t *testing.T) {
+func TestResolveGenerationStyleExecutionSupportsSavedReferenceImages(t *testing.T) {
 	profile := styleProfileDocument{
 		Prompt:          "base style",
 		ExecutionPolicy: "strict-assets",
 		Assets:          []styleProfileAsset{{ID: "reference-1", Kind: "reference", Title: "项目参考图", Provider: "project", Status: "validated", ReferenceResourceIDs: []string{"resource-1"}}},
 	}
 	_, status, warnings := resolveGenerationStyleExecution(profile, "image-model", "openai-image")
-	if status != "blocked" || len(warnings) != 1 {
+	if status != "ready" || len(warnings) != 0 {
 		t.Fatalf("resolveGenerationStyleExecution() status = %q, warnings = %#v", status, warnings)
 	}
 }

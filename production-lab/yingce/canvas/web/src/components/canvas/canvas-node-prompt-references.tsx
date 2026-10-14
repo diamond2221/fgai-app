@@ -2,7 +2,7 @@
 
 import { Image as AntImage, Popover } from "antd";
 import { AtSign, FileText, GripVertical, ImageIcon, Link2, Maximize2, Music2, Pencil, SlidersHorizontal, UserRound, Video, X } from "lucide-react";
-import { type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { canvasReferenceDisplayLabel, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { useState } from "react";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasTheme } from "./canvas-node-prompt-panel";
@@ -239,7 +239,7 @@ export function ConnectedReferenceShelf({
                                 </button>
                                 <button type="button" className="canvas-node-reference-label" title={`插入 @${reference.label}`} onClick={() => onInsert(reference)}>
                                     <span className="opacity-55">@</span>
-                                    <span className="truncate">{reference.label}</span>
+                                    <span className="truncate">{canvasReferenceDisplayLabel(reference)}</span>
                                 </button>
                                 {onRemove ? (
                                     <button

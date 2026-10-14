@@ -25,7 +25,7 @@ export function capabilities(spec,{legacy=false}={}){
   const models={
    'claude-opus-5-5-t3a':[1000000,128000,600],
    'claude-sonnet-5-5-t3a':[1000000,128000,600],
-   'deepseek-v4-pro':[1000000,393216,0],
+   'deepseek-v4-pro':[1048576,393216,0],
    'gpt-6-astra':[1050000,128000,1500],
    'gpt-5.6-sol-t1a':[1050000,128000,1500],
    // Unverified reseller alias remains disabled; do not copy Flash parameters.
@@ -68,5 +68,7 @@ export function capabilities(spec,{legacy=false}={}){
  if(wan3)Object.assign(references,{promptMaxChars:20000,maxImages:10,maxVideos:5,maxVideoBytes:100*1024*1024,minVideoDurationSeconds:1,maxVideoDurationSeconds:15,maxTotalVideoDurationSeconds:15,maxInputOutputDurationSeconds:30,minVideoSide:240,maxVideoSide:4096,maxAudios:5,minAudioDurationSeconds:1,maxAudioDurationSeconds:15,maxTotalAudioDurationSeconds:15,minImageSide:240,maxImageSide:8000,minImageRatio:1/8,maxImageRatio:8,audioOnlySupported:true,imageFormats:['jpg','jpeg','png','bmp','webp'],videoFormats:['mp4','mov'],audioFormats:['wav','mp3']});
  if(happy)Object.assign(references,{promptMaxChars:2500,promptMaxNonChineseChars:5000,maxImageBytes:20*1024*1024,minImageSide:r2v?400:i2v?300:0,minImageRatio:i2v?.4:0,maxImageRatio:i2v?2.5:0,imageFormats:['jpg','jpeg','png','webp'],maxVideoBytes:0,maxAudioBytes:0});
  if(wan3)return {version:1,video:{references,duration:{selection:'enum',values,default:5},durationSupported:true,ratios:['adaptive','21:9','16:9','4:3','1:1','3:4','9:16'],defaultRatio:'adaptive',resolutions:['480p','720p','1080p'],defaultResolution:'1080p',generateAudio:{supported:true,default:true},watermark:{supported:true,default:false},operations,defaultOperation:'text_to_video'}};
- return {version:1,video:{references,duration:{selection:'enum',values,default:values.includes(5)?5:values[0]},durationSupported:true,ratios:i2v?['adaptive']:happy?['16:9','9:16','1:1','4:3','3:4','4:5','5:4','9:21','21:9']:['16:9','4:3','1:1','3:4','9:16','21:9','adaptive'],defaultRatio:i2v?'adaptive':'16:9',resolutions:h3?['768P','2K']:happy?['480P','720P','1080P']:seed25?['480p','720p','1080p']:id==='doubao-seedance-2-0-filter-off'?['480p','720p','1080p','4k']:['480p','720p'],defaultResolution:h3?'768P':happy?'720P':'480p',generateAudio:{supported:seed||h3||wan3,default:seed||h3||wan3},watermark:{supported:seed||h3||happy,default:false},operations,defaultOperation:operations[0]}};
+  // FG explicitly selects 16:9 for reference/T2V budgeting; official adaptive remains selectable.
+  // Strict I2V follows the first frame and remains adaptive regardless of this default.
+  return {version:1,video:{references,duration:{selection:'enum',values,default:values.includes(5)?5:values[0]},durationSupported:true,ratios:i2v?['adaptive']:happy?['16:9','9:16','1:1','4:3','3:4','4:5','5:4','9:21','21:9']:['16:9','4:3','1:1','3:4','9:16','21:9','adaptive'],defaultRatio:i2v?'adaptive':'16:9',resolutions:h3?['768P','2K']:happy?['480P','720P','1080P']:seed25?['480p','720p','1080p']:id==='doubao-seedance-2-0-filter-off'?['480p','720p','1080p','4k']:['480p','720p'],defaultResolution:h3?'768P':happy?'1080P':'720p',generateAudio:{supported:seed||h3||wan3,default:seed||h3||wan3},watermark:{supported:seed||h3||happy,default:false},operations,defaultOperation:operations[0]}};
 }

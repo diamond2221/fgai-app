@@ -22,4 +22,8 @@ test('different official model contracts remain distinct',()=>{
  assert.ok(profile('gpt-image-2.5-flare').image.quality.values.includes('xhigh'));
  assert.equal(profile('happyhorse-1.1-r2v').video.references.minImageSide,400);
  assert.deepEqual(profile('happyhorse-1.1-i2v').video.ratios,['adaptive']);
+ assert.equal(profile('dreamina-seedance-2-5-filter-off').video.defaultResolution,'720p');
+ assert.ok(profile('dreamina-seedance-2-5-filter-off').video.ratios.includes('adaptive'));
+ assert.equal(profile('happyhorse-1.1-t2v').video.defaultResolution,'1080P');
+ assert.equal(profile('deepseek-v4-pro').text.contextWindowTokens,1048576);
 });

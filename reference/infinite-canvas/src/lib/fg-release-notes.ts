@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.7";
+export const CURRENT_RELEASE_VERSION = "1.3.8";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,17 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月14日",
+        items: [
+            { type: "优化", content: "项目画风支持选填 1–6 张上传参考图，用于色彩、光影和材质；简化原执行配置，并保留人物身份与场景设定。" },
+            { type: "新增", content: "资产图片生成可选择电影写实等现有风格 Skill，默认保留短剧资产提示词规范，记录实际风格方向和技能来源。" },
+            { type: "优化", content: "剧情分镜采用完整导演提示词，覆盖摄影、表演、光影、声音与完整动作时间轴，按目标模型时长和提示词上限规划。" },
+            { type: "新增", content: "打戏先确认攻防方向、武器、起止状态和目标，再加载武戏导演 Skill；跨片段核对站位、道具、轴线及光声衔接。" },
+            { type: "修复", content: "画布音频引用显示上传名称，区分角色声音；重新核对现有模型参数，补齐官方默认档位，保留历史任务恢复兼容。" },
+        ],
+    },
+    {
+        version: "1.3.7",
         date: "2026年10月14日",
         items: [
             { type: "修复", content: "GPT Image 2 与 2.5 按当前模型的实际像素尺寸显示宽高比，恢复 16:9 与 9:16，避免旧预设过滤掉官方尺寸。" },

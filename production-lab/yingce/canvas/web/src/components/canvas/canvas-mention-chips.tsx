@@ -4,7 +4,7 @@
 
 import { Brush, Camera, Clapperboard, Clock, Contrast, FastForward, Globe2, Grid2x2, Grid3x3, Package, Palette, PersonStanding, Rewind, ScanFace, SlidersHorizontal, Sparkles, Sun } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { canvasReferenceDisplayLabel, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { createPortal } from "react-dom";
 import { CanvasNodeType } from "@/types/canvas";
 
@@ -61,7 +61,7 @@ export function createInlineMentionChip(reference: CanvasResourceReference, toke
 
     const label = document.createElement("span");
     label.className = "canvas-resource-inline-label";
-    label.textContent = reference.label;
+    label.textContent = canvasReferenceDisplayLabel(reference);
     chip.appendChild(label);
 
     return chip;
@@ -137,7 +137,7 @@ export function syncInlineMentionPreviews(editor: HTMLElement, references: Canva
             preview.replaceWith(createInlinePreview(reference));
         }
         const label = chip.querySelector(".canvas-resource-inline-label");
-        if (label && label.textContent !== reference.label) label.textContent = reference.label;
+        if (label && label.textContent !== canvasReferenceDisplayLabel(reference)) label.textContent = canvasReferenceDisplayLabel(reference);
     });
 }
 

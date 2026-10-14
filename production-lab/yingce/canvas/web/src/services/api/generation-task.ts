@@ -2,7 +2,8 @@ import { normalizeAudioFormatForConfig, normalizeAudioVoiceForConfig } from "@/l
 import { imageParameterRequest } from "@/lib/image-parameters";
 import { getMediaBlob } from "@/services/file-storage";
 import { getImageBlob } from "@/services/image-storage";
-import { resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
+import { getResource, resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
+import { parseStyleProfile, styleReferenceResourceIds } from "@/lib/canvas/style-profile";
 import { createGenerationTask, waitForGenerationTask, type GenerationTask, type CreateTaskInput } from "@/services/api/task-center";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { grokImagePromptLimitError } from "@/lib/grok-image-prompt-limit";
@@ -98,7 +99,7 @@ export async function runBackendGenerationTask(
     throwIfAborted(signal);
     assertClientPromptLimit(mode, prompt, config, metadata);
     assertBackendRuntimeConfigured(config, mode);
-    const prepared = await prepareGenerationReferences({ config, mode, referenceImages, referenceVideos, referenceAudios, mask });
+    const prepared = await prepareGenerationReferences({ config, mode, referenceImages, referenceVideos, referenceAudios, mask, metadata });
     throwIfAborted(signal);
     return createAndWaitGenerationTask({ projectId, mode, prompt, config, referenceImages, referenceVideos, referenceAudios, textHistory, signal, metadata, onTaskUpdate, onTextDelta, streamText, enableThinking, clientOperationId, retryOf, attemptGroupId }, prepared, dependencies);
 }
@@ -244,7 +245,18 @@ async function prepareGenerationReferences({
     referenceVideos = [],
     referenceAudios = [],
     mask,
-}: Pick<BackendGenerationTaskOptions, "config" | "mode" | "referenceImages" | "referenceVideos" | "referenceAudios" | "mask">): Promise<PreparedGenerationReferences> {
+    metadata,
+}: Pick<BackendGenerationTaskOptions, "config" | "mode" | "referenceImages" | "referenceVideos" | "referenceAudios" | "mask" | "metadata">): Promise<PreparedGenerationReferences> {
+    if (mode === "image" && typeof metadata?.styleProfileJson === "string") {
+        const ids = styleReferenceResourceIds(parseStyleProfile(metadata.styleProfileJson));
+        const existing = new Set(referenceImages.map(image => resourceIdFromStorageKey(image.storageKey)));
+        const missing = ids.filter(id => !existing.has(id));
+        const inherited = await Promise.all(missing.map(async (id): Promise<ReferenceImage> => {
+            const resource = await getResource(id);
+            return { id, name: "项目画风参考", type: resource.mimeType, dataUrl: "", storageKey: resourceStorageKey(id), width: resource.width, height: resource.height, bytes: resource.size };
+        }));
+        referenceImages = [...referenceImages, ...inherited];
+    }
     // asset:// 仅视频生成可用；Agent Plan Seedream 与 Seedance 共用 /api/plan/v3，不能按 BaseURL 误判。
     const preferArkAssetUrl = mode === "video" && usesArkVideoAssetReference(config);
     const preparedImages = await Promise.all(referenceImages.map((image) => prepareBackendImageReference(image, preferArkAssetUrl)));

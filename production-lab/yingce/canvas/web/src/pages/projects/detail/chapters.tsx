@@ -1,4 +1,4 @@
-import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Select, Segmented } from "antd";
+import { App, Button, Checkbox, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Select, Segmented } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { Tooltip } from "@/components/ui/base/tooltip";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
@@ -119,6 +119,8 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
     const [planningVideoModel, setPlanningVideoModel] = useState(detail.project.defaultVideoModel || effectiveConfig.videoModel);
     const [segmentSeconds, setSegmentSeconds] = useState(15);
     const [segmentStrategy, setSegmentStrategy] = useState<DramaProductionPlan["strategy"]>("story");
+    const [includeAction, setIncludeAction] = useState(false);
+    const [actionDirection, setActionDirection] = useState("");
     const planningDurations = dramaSegmentDurations(effectiveConfig, planningVideoModel);
     const planningSeconds = planningDurations.includes(segmentSeconds) ? segmentSeconds : planningDurations.includes(15) ? 15 : planningDurations[0];
     useEffect(() => { if (!planningVideoModel) setPlanningVideoModel(detail.project.defaultVideoModel || effectiveConfig.videoModel); }, [planningVideoModel, detail.project.defaultVideoModel, effectiveConfig.videoModel]);
@@ -417,6 +419,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         }
     };
     const createStoryboard = async () => {
+        if (includeAction && !actionDirection.trim()) return message.warning("请先填写并确认打戏方向，再设计动作分镜");
         const unit = selectedUnit;
         if (!unit) return message.warning("章节正文尚未加载完成");
         if (dirty) return message.warning("请先保存当前章节，再生成分镜");
@@ -439,6 +442,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         try {
             const result = await generateChapterStoryboard({
                 projectId: detail.project.id,
+                projectName: detail.project.name,
                 chapterId: unit.id,
                 chapterTitle: unit.title,
                 sourceText,
@@ -454,6 +458,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                 skills: availableSkills,
                 selectedSkillIds,
                 productionPlan: createDramaProductionPlan(effectiveConfig, planningVideoModel, planningSeconds, segmentStrategy),
+                actionDirection: includeAction ? actionDirection.trim() : undefined,
             }, { onTaskUpdate: (task) => updateChapterOperation(unit.id, "storyboard", task) });
             const shotCount = await storeGeneratedStoryboard(unit.id, result.rows, result.productionPlan);
             message.success(`已生成 ${shotCount} 个视频片段，并应用 ${result.skillCount} 个技能`);
@@ -627,7 +632,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                             </div>
                             <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
                                 <Button size="small" icon={<UsersRound className="size-3.5" />} disabled={!selectedUnit || dirty || Boolean(characterOperation)} loading={Boolean(characterOperation)} onClick={() => { setSelectedTextModel(effectiveConfig.textModel || effectiveConfig.model || effectiveConfig.textModels[0] || ""); setCharacterExtractOpen(true); }} aria-label={characterOperation ? `提取角色、场景与道具，已运行 ${formatOperationElapsed(characterOperation.startedAt, operationNow)}` : "提取角色、场景与道具"}>{characterOperation ? `提取资产（已运行${formatOperationElapsed(characterOperation.startedAt, operationNow)}）` : charactersGenerated ? "提取资产（已生成）" : "提取角色、场景与道具"}</Button>
-                                <Button size="small" type="primary" icon={<Clapperboard className="size-3.5" />} disabled={!selectedUnit || dirty || Boolean(storyboardOperation)} loading={Boolean(storyboardOperation)} onClick={() => { setSelectedTextModel(effectiveConfig.textModel || effectiveConfig.model || effectiveConfig.textModels[0] || ""); setSelectedSkillIds([]); setStoryboardOpen(true); }} aria-label={storyboardOperation ? `生成到分镜制作，已运行 ${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}` : "生成到分镜制作"}>{storyboardOperation ? `生成到分镜制作（已运行${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}）` : storyboardGenerated ? "生成到分镜制作（已生成）" : "生成到分镜制作"}</Button>
+                                <Button size="small" type="primary" icon={<Clapperboard className="size-3.5" />} disabled={!selectedUnit || dirty || Boolean(storyboardOperation)} loading={Boolean(storyboardOperation)} onClick={() => { setSelectedTextModel(effectiveConfig.textModel || effectiveConfig.model || effectiveConfig.textModels[0] || ""); setSelectedSkillIds([]); setIncludeAction(/打斗|打戏|搏斗|交锋|挥拳|拳击|决斗|斗法|剑气|fight(?:ing)?|combat|duel/i.test(editor?.getText() || stripHtml(selectedUnit?.sourceText || ""))); setActionDirection(""); setStoryboardOpen(true); }} aria-label={storyboardOperation ? `生成到分镜制作，已运行 ${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}` : "生成到分镜制作"}>{storyboardOperation ? `生成到分镜制作（已运行${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}）` : storyboardGenerated ? "生成到分镜制作（已生成）" : "生成到分镜制作"}</Button>
                                 <Button size="small" type={dirty ? "primary" : "default"} icon={dirty ? <Save className="size-3.5" /> : <Check className="size-3.5" />} disabled={!selectedUnit || !dirty || !draftTitle.trim() || saveMutation.isPending} loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>{dirty ? "保存" : "已保存"}</Button>
                             </div>
                         </header>
@@ -657,7 +662,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                     </label>
                 </div>
             </Modal>
-            <Modal className="library-modal" title="生成剧情视频片段" open={storyboardOpen} width={620} okText={storyboardImpact.shotCount ? "重新划分片段" : "生成片段脚本"} cancelText="取消" okButtonProps={{ disabled: !selectedTextModel || !planningSeconds }} onCancel={() => setStoryboardOpen(false)} onOk={() => void createStoryboard()} styles={{ body: { paddingTop: 12 } }}>
+            <Modal className="library-modal" title="生成剧情视频片段" open={storyboardOpen} width={620} okText={storyboardImpact.shotCount ? "重新划分片段" : "生成片段脚本"} cancelText="取消" okButtonProps={{ disabled: !selectedTextModel || !planningSeconds || includeAction && !actionDirection.trim() }} onCancel={() => setStoryboardOpen(false)} onOk={() => void createStoryboard()} styles={{ body: { paddingTop: 12, maxHeight: "70dvh", overflowY: "auto" } }}>
                 <div className="grid gap-4">
                     <div className="rounded-lg border border-border/70 bg-foreground/[.018] px-3 py-2.5">
                         <div className="text-[var(--fs-tiny)] text-foreground/42">当前章节</div>
@@ -681,6 +686,10 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                     {planningSeconds ? <FGPricePreview config={{ ...effectiveConfig, model: planningVideoModel, videoSeconds: String(planningSeconds) }} model={planningVideoModel} mode="video" requirements={{ capability: "video", videoSeconds: String(planningSeconds), input: { textCount: 1, imageCount: 0, characterCount: 0, videoCount: 0, audioCount: 0 } }} /> : null}
                     <p className="text-[var(--fs-tiny)] text-foreground/45">上方为所选规格单条视频的费用参考；本次先生成脚本，视频在分镜制作中另行提交。</p>
                     <div className="rounded-lg bg-foreground/[.025] p-3 text-xs leading-5 text-foreground/65"><p>默认应用 short-drama-asset-prompts（资产设定与引用校验）和 script-to-drama-prompt-dev（片段分镜与视频提示词）。</p></div>
+                    <div className="grid gap-2">
+                        <Checkbox checked={includeAction} onChange={event => setIncludeAction(event.target.checked)}>本章含打戏，使用 wuxi-action-director-public</Checkbox>
+                        {includeAction ? <><Input.TextArea aria-label="确认打戏方向" value={actionDirection} onChange={event => setActionDirection(event.target.value)} autoSize={{ minRows: 4, maxRows: 8 }} placeholder="确认攻防人物、谁先手、武器、空间与距离、起止站位和状态、目标或胜负、节奏、允许特效与禁用项；例如A徒手防守，B持短刀逼近，最终A退到门边脱身，双方不受重伤。" /><p className="text-xs leading-5 text-foreground/50">点击生成即按此方向设计；保留原剧情与台词，动作结果和下一片段站位逐项衔接。</p></> : null}
+                    </div>
                     <div>
                         <label className="block">
                             <span className="mb-1.5 block text-xs font-medium text-foreground/68">分镜技能</span>

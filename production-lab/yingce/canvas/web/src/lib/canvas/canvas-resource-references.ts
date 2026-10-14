@@ -83,6 +83,11 @@ export function canvasNodeMentionToken(nodeId: string) {
     return `@[node:${nodeId}]`;
 }
 
+export function canvasReferenceDisplayLabel(reference: Pick<CanvasResourceReference, "kind" | "label" | "title">) {
+    const title = reference.title?.trim();
+    return reference.kind === "audio" && title && title !== reference.label ? `${reference.label} · ${title}` : reference.label;
+}
+
 /** 这些工具类型的标签在提示词中唯一，再次选择时直接覆盖旧标签而不是追加。 */
 const UNIQUE_TOOL_MENTION_TYPES = new Set(["style", "nine_grid", "effect"]);
 

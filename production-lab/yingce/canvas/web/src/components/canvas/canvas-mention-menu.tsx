@@ -1,6 +1,6 @@
 // @ 引用候选菜单：分组列表、预览与定位。
 
-import { type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { canvasReferenceDisplayLabel, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { type MouseEvent, type PointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { type AssetCategory } from "@/stores/use-asset-store";
 import { ASSET_CATEGORY_LABELS } from "@/lib/asset-category";
@@ -202,7 +202,7 @@ export function MentionReferenceList({ references, activeReferenceId, onSelect }
             <ReferencePreview reference={reference} />
             <span className="canvas-resource-mention-copy">
                 <span className="canvas-resource-mention-title-row">
-                    <strong title={reference.label}>{reference.label}</strong>
+                    <strong title={reference.title || reference.label}>{canvasReferenceDisplayLabel(reference)}</strong>
                     {reference.kind === "skill" ? <em>技能</em> : null}
                 </span>
                 {reference.kind === "skill" ? (

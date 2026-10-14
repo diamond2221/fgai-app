@@ -4,6 +4,11 @@ import { AppModal } from "@/components/ui/product/app-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { FGPricePreview } from "@/components/fg-price-preview";
+import { FGSkillControl } from "@/components/fg-skill-control";
+import { composeFGImageStylePrompt, fgImageStyles } from "@/services/fg-image-styles";
+import { fgSkillCatalog } from "@/services/fg-skill-catalog";
+import { skillRuntime } from "@/services/skill-runtime";
+import { parseStyleProfile, styleReferenceResourceIds } from "@/lib/canvas/style-profile";
 import { AssetLibraryPickerModal } from "@/components/assets/asset-library-picker-modal";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -36,6 +41,8 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
     const [prices, setPrices] = useState<Record<string, number | undefined>>({});
     const style = useMemo(() => resolveProjectCanvasStyle(detail.project.stylePresetId, detail.project.styleProfileJson), [detail.project.stylePresetId, detail.project.styleProfileJson]);
     const change = (id: string, patch: Partial<Row>) => setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+    const styleProfile = useMemo(() => parseStyleProfile(detail.project.styleProfileJson), [detail.project.styleProfileJson]);
+    const referenceIds = (row: Row) => [...new Set([...row.references, ...styleReferenceResourceIds(styleProfile)])];
     useEffect(() => {
         let cancelled = false;
         void (async () => {
@@ -143,17 +150,23 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
             failed = 0;
         try {
             const provenance = (await shortDramaSkillProvenance()).filter((skill) => skill.name === ASSET_PROMPT_SKILL);
+            const catalog = generate && chosen.some((row) => /@\[skill:|@zy-|@lira-|@cinema-|@deepwhite-/.test(row.prompt)) ? await fgSkillCatalog.list() : [];
             await runAssetBatch(
                 chosen,
                 async (row) => {
                     if (generate && !row.prompt.trim()) throw Error("请填写图片提示词");
+                    const styleSkillIds = fgImageStyles.filter((skill) => row.prompt.includes(`@[skill:${skill.skillId}]`) || row.prompt.includes(`@${skill.slug}`)).map((skill) => skill.skillId);
+                    const generationPrompt = composeFGImageStylePrompt(row.prompt, styleSkillIds) || row.prompt;
+                    // Direct image models receive the selected style's visual direction, not a multi-step Skill workflow.
+                    // Read selected Skill versions/files for auditable provenance while preserving the editable user prompt.
+                    const styleRuntime = generate && styleSkillIds.length ? await skillRuntime.prepare({ profile: "canvas", prompt: row.prompt, skills: catalog, selectedSkillIds: styleSkillIds, capability: "image" }) : undefined;
                     const referenceImages = await Promise.all(
-                        row.references.map(async (id) => {
+                        referenceIds(row).map(async (id) => {
                             const resource = await getResource(id);
                             return { id, name: resource.id, type: resource.mimeType, dataUrl: "", storageKey: resourceStorageKey(id), width: resource.width, height: resource.height, bytes: resource.size };
                         }),
                     );
-                    if (generate) await prepareBackendGenerationTask({ projectId: detail.project.id, mode: "image", prompt: row.prompt, config, referenceImages });
+                    if (generate) await prepareBackendGenerationTask({ projectId: detail.project.id, mode: "image", prompt: generationPrompt, config, referenceImages });
                     let asset = await confirmRow(row);
                     change(row.id, { asset, candidateId: undefined });
                     if (!generate) return;
@@ -166,7 +179,7 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                     const task = await submitBackendGenerationTask({
                         projectId: detail.project.id,
                         mode: "image",
-                        prompt: row.prompt,
+                        prompt: generationPrompt,
                         config,
                         referenceImages,
                         clientOperationId: row.operationId,
@@ -177,6 +190,8 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                             characterAssetId: asset.category === "character" ? asset.id : undefined,
                             resolvedCharacterVersions: asset.character ? [{ assetId: asset.id, versionId: asset.character.versionId }] : [],
                             assetPromptSkill: provenance,
+                            imageStyleSkillIds: styleSkillIds,
+                            imageStyleExecution: styleRuntime ? { method: "curated-image-direction", ...styleRuntime.metadata, directions: styleSkillIds.map((id) => fgImageStyles.find((skill) => skill.skillId === id)) } : undefined,
                             stylePresetId: style?.id,
                             styleProfileJson: detail.project.styleProfileJson,
                             source: "project-asset-batch",
@@ -215,9 +230,7 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                         已选 {selected.length} 项 · {quoted ? `预估合计 ≈¥${total.toFixed(4)}` : "合计价格待确认"}
                     </span>
                     <div className="flex gap-2">
-                        <Button onClick={onClose}>
-                            {busy ? "关闭并在后台继续" : "关闭"}
-                        </Button>
+                        <Button onClick={onClose}>{busy ? "关闭并在后台继续" : "关闭"}</Button>
                         {!single && (
                             <Button disabled={busy || !selectedCandidates.length} onClick={() => void execute(false)}>
                                 仅确认所选（不收费）
@@ -239,6 +252,7 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                     <summary>查看全局画风与世界观</summary>
                     <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs">{style?.prompt || "项目未设置画风，可先在项目设置中补充地区、时代、视觉媒介和角色身份。"}</pre>
                 </details>
+                {styleReferenceResourceIds(styleProfile).length > 0 && <p className="text-xs text-foreground/65">已继承 {styleReferenceResourceIds(styleProfile).length} 张画风参考图，随每项资产一起提交。只参考光影、色彩和材质。</p>}
                 <ModelPicker
                     config={config}
                     value={config.model}
@@ -287,6 +301,7 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                                 )}
                                 <Input.TextArea className="mt-2" aria-label={`${row.asset.title} 生图提示词`} autoSize={{ minRows: 5, maxRows: 12 }} value={row.prompt} disabled={busy} onChange={(e) => change(row.id, { prompt: e.target.value })} />
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <FGSkillControl references={[]} prompt={row.prompt} onChange={(prompt) => change(row.id, { prompt })} disabled={busy} capability="image" imageStylesOnly />
                                     <Button size="small" disabled={busy} onClick={() => change(row.id, { prompt: projectAssetGenerationPrompt(row.asset, style?.prompt || "", true) })}>
                                         按当前设定重建提示词
                                     </Button>
@@ -298,7 +313,7 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                                             config={config}
                                             model={config.model}
                                             mode="image"
-                                            requirements={{ input: { textCount: 0, imageCount: row.references.length, videoCount: 0, audioCount: 0, characterCount: 0 } }}
+                                            requirements={{ input: { textCount: 0, imageCount: referenceIds(row).length, videoCount: 0, audioCount: 0, characterCount: 0 } }}
                                             onQuote={(quote) => setPrices((current) => (current[row.id] === quote?.estimatedCny ? current : { ...current, [row.id]: quote?.estimatedCny ?? undefined }))}
                                         />
                                     )}
@@ -338,17 +353,15 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                         for (const file of Array.from(files)) {
                             const result = await uploadImage(file);
                             ids.push(
-                                useAssetStore
-                                    .getState()
-                                    .addAsset({
-                                        kind: "image",
-                                        title: file.name,
-                                        coverUrl: result.url,
-                                        tags: [],
-                                        status: "confirmed",
-                                        source: "资产生图参考",
-                                        data: { dataUrl: result.url, storageKey: result.storageKey, width: result.width, height: result.height, bytes: result.bytes, mimeType: result.mimeType },
-                                    }),
+                                useAssetStore.getState().addAsset({
+                                    kind: "image",
+                                    title: file.name,
+                                    coverUrl: result.url,
+                                    tags: [],
+                                    status: "confirmed",
+                                    source: "资产生图参考",
+                                    data: { dataUrl: result.url, storageKey: result.storageKey, width: result.width, height: result.height, bytes: result.bytes, mimeType: result.mimeType },
+                                }),
                             );
                         }
                         return ids;

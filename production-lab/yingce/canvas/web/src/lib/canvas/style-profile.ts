@@ -65,6 +65,31 @@ export type StyleProfileSource = Pick<StyleProfileSnapshot, "title" | "descripti
 
 const MAX_PROFILE_BYTES = 256 * 1024;
 export const MAX_STYLE_ASSETS = 20;
+export const MAX_STYLE_REFERENCE_IMAGES = 6;
+
+export function styleReferenceResourceIds(profile: Pick<StyleProfileSnapshot, "assets"> | null | undefined) {
+    return [
+        ...new Set(
+            (profile?.assets || [])
+                .filter((asset) => asset.kind === "reference" && asset.enabled !== false && asset.status === "validated")
+                .flatMap((asset) => asset.referenceResourceIds || [])
+                .map((id) => id.trim())
+                .filter(Boolean),
+        ),
+    ];
+}
+
+export function withStyleReferenceResources(profile: StyleProfileSnapshot, ids: string[]): Partial<StyleProfileSnapshot> {
+    const resources = [...new Set(ids)];
+    if (resources.length > MAX_STYLE_REFERENCE_IMAGES) throw Error("画风参考图最多 6 张");
+    return {
+        executionPolicy: "compatible-fallback",
+        assets: [
+            ...profile.assets.filter((asset) => asset.kind !== "reference"),
+            ...resources.map((id, index): StyleAssetBinding => ({ id: `style-reference:${id}`, kind: "reference", provider: "fg-resource", title: `画风参考 ${index + 1}`, enabled: true, referenceResourceIds: [id], status: "validated" })),
+        ],
+    };
+}
 
 export type StyleExecutionContext = {
     mode: "image" | "video";
@@ -249,7 +274,8 @@ function resolveAssetExecution(asset: StyleAssetBinding, context: StyleExecution
     }
     if (asset.kind === "prompt") return { assetId: asset.id, title: asset.title, kind: asset.kind, action: "prompt", reason: "追加到项目画风提示词" };
     if (asset.kind === "template" && (asset.promptFragment?.trim() || asset.triggerWords?.length)) return { assetId: asset.id, title: asset.title, kind: asset.kind, action: "prompt", reason: "当前以模板触发词执行" };
-    if (asset.kind === "reference") return { assetId: asset.id, title: asset.title, kind: asset.kind, action: "block", reason: "项目参考图自动注入适配器尚未启用" };
+    if (asset.kind === "reference" && asset.referenceResourceIds?.length) return { assetId: asset.id, title: asset.title, kind: asset.kind, action: "reference", reason: "以画风参考图片随生成提交" };
+    if (asset.kind === "reference") return { assetId: asset.id, title: asset.title, kind: asset.kind, action: "block", reason: "请上传画风参考图，生成只使用已保存的资源" };
     if (asset.kind === "lora") return { assetId: asset.id, title: asset.title, kind: asset.kind, action: "block", reason: `当前 ${context.interfaceType || "图片"} 协议未启用 LoRA 适配器` };
     return { assetId: asset.id, title: asset.title, kind: asset.kind, action: "block", reason: "当前协议不支持该执行资产" };
 }

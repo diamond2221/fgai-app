@@ -8,7 +8,7 @@ import {fgSkillCatalog} from '@/services/fg-skill-catalog';
 import type {Skill} from '@/services/api/skills';
 import {fgImageStyle} from '@/services/fg-image-styles';
 import './fg-controls.css';
-export function FGSkillControl({references,prompt,onChange,disabled,capability}:{references:CanvasResourceReference[];prompt:string;onChange:(value:string)=>void;disabled?:boolean;capability?:string}){
+export function FGSkillControl({references,prompt,onChange,disabled,capability,imageStylesOnly=false}:{references:CanvasResourceReference[];prompt:string;onChange:(value:string)=>void;disabled?:boolean;capability?:string;imageStylesOnly?:boolean}){
  const [open,setOpen]=useState(false);
  const [catalog,setCatalog]=useState<Skill[]>([]);
  const [loading,setLoading]=useState(false);
@@ -26,7 +26,7 @@ export function FGSkillControl({references,prompt,onChange,disabled,capability}:
  },[open]);
  const skills=[...new Map([...references.filter(r=>r.kind==='skill'&&r.active&&r.skill),...buildSkillMentionReferences(catalog.map(skill=>({...skill,isAdded:true})))].map(r=>[r.id,r])).values()];
  const selected=skills.filter(r=>prompt.includes(canvasResourceMentionToken(r))||prompt.includes('@'+r.label));
- const filtered=skills.filter(r=>category==='all'||selected.includes(r)||(category==='recommended'?(capability==='image'?!!fgImageStyle(r.skill!.skillId)?.direct:capability==='video'?r.skill?.tag==='drama':true):r.skill?.tag===category));
+ const filtered=skills.filter(r=>(!imageStylesOnly || !!fgImageStyle(r.skill!.skillId)?.direct) && (category==='all'||selected.includes(r)||(category==='recommended'?(capability==='image'?!!fgImageStyle(r.skill!.skillId)?.direct:capability==='video'?r.skill?.tag==='drama':true):r.skill?.tag===category)));
  async function select(ids:string[]){
   if(selecting.current)return;
   selecting.current=true;setPending(true);setError('');

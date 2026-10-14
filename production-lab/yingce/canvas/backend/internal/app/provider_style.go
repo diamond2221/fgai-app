@@ -68,6 +68,54 @@ func (s *Service) applyGenerationStyleProfile(userID string, taskProjectID strin
 	if expectedStatus == "blocked" {
 		return fmt.Errorf("当前图片模型无法完整执行项目画风：%s。请切换图片模型，或在项目设置中停用对应画风资产", strings.Join(warnings, "；"))
 	}
+	return s.appendStyleReferenceImages(userID, profile, input)
+}
+
+func (s *Service) appendStyleReferenceImages(userID string, profile styleProfileDocument, input *canvasGenerationInput) error {
+	seen := map[string]bool{}
+	for _, image := range input.ReferenceImages {
+		if strings.HasPrefix(image.StorageKey, "resource:") {
+			seen[strings.TrimPrefix(image.StorageKey, "resource:")] = true
+		}
+	}
+	styleIDs := map[string]bool{}
+	directions := []string{}
+	for _, asset := range profile.Assets {
+		if asset.Kind != "reference" || asset.Status != "validated" || asset.Enabled != nil && !*asset.Enabled {
+			continue
+		}
+		for _, id := range asset.ReferenceResourceIDs {
+			id = strings.TrimSpace(id)
+			if id == "" || styleIDs[id] {
+				continue
+			}
+			styleIDs[id] = true
+			if len(styleIDs) > 6 {
+				return errors.New("画风参考图最多 6 张")
+			}
+			resource, err := s.repo.ResourceForUser(userID, id)
+			if err != nil {
+				return fmt.Errorf("读取画风参考图失败：%w", err)
+			}
+			if resource.Status != "ready" || !strings.HasPrefix(strings.ToLower(resource.MimeType), "image/") {
+				return errors.New("画风参考图必须是已保存的图片")
+			}
+			if !seen[id] {
+				input.ReferenceImages = append(input.ReferenceImages, providerMedia{ID: id, Name: asset.Title, Type: resource.MimeType, MimeType: resource.MimeType, StorageKey: "resource:" + id, Role: "reference_image", Width: resource.Width, Height: resource.Height, Bytes: resource.Size})
+				seen[id] = true
+			}
+			for index := range input.ReferenceImages {
+				if input.ReferenceImages[index].StorageKey == "resource:"+id {
+					input.ReferenceImages[index].Name = "画风参考 · " + asset.Title
+					directions = append(directions, fmt.Sprintf("参考图片%d（%s）：仅用于色彩、光影、材质和媒介。", index+1, asset.Title))
+					break
+				}
+			}
+		}
+	}
+	if len(styleIDs) > 0 {
+		input.Prompt += "\n\n【画风参考职责】\n" + strings.Join(directions, "\n") + "\n不继承画风图中人物身份、服装、道具或场景。角色和场景仍严格遵循本任务设定。"
+	}
 	return nil
 }
 
@@ -176,7 +224,9 @@ func resolveGenerationStyleExecution(profile styleProfileDocument, generationMod
 			fragments = append(fragments, strings.TrimSpace(asset.PromptFragment))
 			fragments = append(fragments, nonEmptyStyleProfileStrings(asset.TriggerWords)...)
 		case "reference":
-			warnings = append(warnings, asset.Title+"：项目参考图自动注入适配器尚未启用")
+			if len(asset.ReferenceResourceIDs) == 0 {
+				warnings = append(warnings, asset.Title+"：请上传已保存的画风参考图")
+			}
 		case "lora":
 			warnings = append(warnings, asset.Title+"：当前 "+firstNonEmpty(interfaceType, "图片")+" 协议未启用 LoRA 适配器")
 		}
