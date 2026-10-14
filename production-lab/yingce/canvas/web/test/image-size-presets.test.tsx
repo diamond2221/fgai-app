@@ -4,7 +4,7 @@ import { ImageSizePicker } from "../src/components/image-size-picker";
 import { applyImageSizeSelection } from "../src/components/image-settings-panel";
 import { ImageSizePresetsEditor } from "../src/components/image-size-presets-editor";
 import { ModelCapabilityEditor } from "../src/components/model-capability-editor";
-import { defaultImageCapabilityConfig, normalizeImageValue, normalizeModelCapabilityConfig } from "../src/lib/model-capabilities";
+import { defaultImageCapabilityConfig, modelCapabilityConfigFor, normalizeImageValue, normalizeModelCapabilityConfig } from "../src/lib/model-capabilities";
 import { IMAGE_RATIOS, IMAGE_RESOLUTIONS, imagePresetForRatio, imagePresetValue, imageQualityForSelection, imageQualityForTier, imageSizeConfigWithPresets, imageSizePresets, imageTierAvailable } from "../src/lib/image-size-presets";
 import { imageQualityLabel } from "../src/lib/image-quality";
 import { buildImageResolutionOptions } from "../src/lib/image-resolution-tiers";
@@ -12,6 +12,19 @@ import { resolveImageRequestSize, validateImageSize } from "../src/services/api/
 import { buildGeminiImageGenerationConfig } from "../src/lib/gemini-image";
 
 describe("统一图片分辨率与宽高比", () => {
+    test("GPT Image 2 and 2.5 render the configured official 16:9 pixels instead of inherited legacy presets", () => {
+        for (const model of ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
+            const image = defaultImageCapabilityConfig("openai-image", model);
+            image.size = { parameter: "size", values: ["auto", "1024x1024", "1536x864", "864x1536"], default: "1024x1024", allowCustom: false };
+            image.parameters = [{ name: "size", label: "尺寸", type: "string", values: image.size.values, default: "1024x1024", binding: "aspectRatio", encoding: "pixels" }];
+            const profile = modelCapabilityConfigFor({ channels: [{ id: "test", models: [model], modelCosts: [{ model, protocol: "openai-image", capabilityConfig: { version: 1, image } }] }] }, `test::${model}`).image!;
+            const markup = renderToStaticMarkup(<ImageSizePicker profile={profile} size="1536x864" onChange={() => {}} />);
+            expect(markup).toContain("16:9");
+            expect(markup).toContain("9:16");
+            expect(markup).toContain("1536 × 864 px");
+            expect(normalizeImageValue(profile, { size: "1536x864" }).size).toBe("1536x864");
+        }
+    });
     test("画质公共映射覆盖创作与画布使用的 xhigh、max", () => {
         expect(imageQualityLabel("xhigh")).toBe("超高");
         expect(imageQualityLabel("MAX")).toBe("最高");

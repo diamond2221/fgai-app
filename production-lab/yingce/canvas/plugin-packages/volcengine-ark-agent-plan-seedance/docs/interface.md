@@ -230,10 +230,32 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
                     "$ref": "request.images"
                   }
                 },
-                9
+                {
+                  "$if": {
+                    "condition": {
+                      "$gt": [
+                        {
+                          "$len": {
+                            "$split": [
+                              {
+                                "$lower": {
+                                  "$ref": "request.model"
+                                }
+                              },
+                              "seedance-2-5"
+                            ]
+                          }
+                        },
+                        1
+                      ]
+                    },
+                    "then": 30,
+                    "else": 9
+                  }
+                }
               ]
             },
-            "message": "Seedance 最多支持 9 张参考图片"
+            "message": "参考图片数量超过当前 Seedance 模型上限（2.5：30 张；2.0：9 张）"
           },
           {
             "assert": {
@@ -243,10 +265,32 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
                     "$ref": "request.videos"
                   }
                 },
-                3
+                {
+                  "$if": {
+                    "condition": {
+                      "$gt": [
+                        {
+                          "$len": {
+                            "$split": [
+                              {
+                                "$lower": {
+                                  "$ref": "request.model"
+                                }
+                              },
+                              "seedance-2-5"
+                            ]
+                          }
+                        },
+                        1
+                      ]
+                    },
+                    "then": 10,
+                    "else": 3
+                  }
+                }
               ]
             },
-            "message": "Seedance 最多支持 3 个参考视频"
+            "message": "参考视频数量超过当前 Seedance 模型上限（2.5：10 段；2.0：3 段）"
           },
           {
             "assert": {
@@ -256,14 +300,53 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
                     "$ref": "request.audios"
                   }
                 },
-                3
+                {
+                  "$if": {
+                    "condition": {
+                      "$gt": [
+                        {
+                          "$len": {
+                            "$split": [
+                              {
+                                "$lower": {
+                                  "$ref": "request.model"
+                                }
+                              },
+                              "seedance-2-5"
+                            ]
+                          }
+                        },
+                        1
+                      ]
+                    },
+                    "then": 10,
+                    "else": 3
+                  }
+                }
               ]
             },
-            "message": "Seedance 最多支持 3 个参考音频"
+            "message": "参考音频数量超过当前 Seedance 模型上限（2.5：10 段；2.0：3 段）"
           },
           {
             "assert": {
               "$or": [
+                {
+                  "$gt": [
+                    {
+                      "$len": {
+                        "$split": [
+                          {
+                            "$lower": {
+                              "$ref": "request.model"
+                            }
+                          },
+                          "seedance-2-5"
+                        ]
+                      }
+                    },
+                    1
+                  ]
+                },
                 {
                   "$eq": [
                     {
@@ -295,7 +378,7 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
                 }
               ]
             },
-            "message": "Seedance 不支持纯音频或文本+音频，请同时添加参考图片或参考视频"
+            "message": "当前 Seedance 模型不支持纯音频或文本+音频，请同时添加参考图片或参考视频"
           }
         ],
         "create": {

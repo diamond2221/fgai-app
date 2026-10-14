@@ -408,11 +408,13 @@ add({
   response: { status: "succeeded", images: ref("response.data"), usage: ref("response.usage"), errorPaths: ["error.code"], messagePaths: ["error.message"] }
 });
 
+// Version-specific limits must also apply in the executable plugin, not just the model picker.
+const seedance25 = gt(len(split(lower(ref("request.model")), "seedance-2-5")), 1);
 const arkSeedanceValidations = [
-  { assert: { $lte: [len(ref("request.images")), 9] }, message: "Seedance 最多支持 9 张参考图片" },
-  { assert: { $lte: [len(ref("request.videos")), 3] }, message: "Seedance 最多支持 3 个参考视频" },
-  { assert: { $lte: [len(ref("request.audios")), 3] }, message: "Seedance 最多支持 3 个参考音频" },
-  { assert: { $or: [eq(len(ref("request.audios")), 0), gt({ $add: [len(ref("request.images")), len(ref("request.videos"))] }, 0)] }, message: "Seedance 不支持纯音频或文本+音频，请同时添加参考图片或参考视频" }
+  { assert: lte(len(ref("request.images")), conditional(seedance25, 30, 9)), message: "参考图片数量超过当前 Seedance 模型上限（2.5：30 张；2.0：9 张）" },
+  { assert: lte(len(ref("request.videos")), conditional(seedance25, 10, 3)), message: "参考视频数量超过当前 Seedance 模型上限（2.5：10 段；2.0：3 段）" },
+  { assert: lte(len(ref("request.audios")), conditional(seedance25, 10, 3)), message: "参考音频数量超过当前 Seedance 模型上限（2.5：10 段；2.0：3 段）" },
+  { assert: { $or: [seedance25, eq(len(ref("request.audios")), 0), gt({ $add: [len(ref("request.images")), len(ref("request.videos"))] }, 0)] }, message: "当前 Seedance 模型不支持纯音频或文本+音频，请同时添加参考图片或参考视频" }
 ];
 
 const arkSeedanceParams = [

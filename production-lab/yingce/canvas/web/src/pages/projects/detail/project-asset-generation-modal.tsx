@@ -208,17 +208,15 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
             width={1000}
             title={single ? `图片生成设置 · ${single.title}` : "批量确认与生成资产"}
             open
-            onCancel={() => {
-                if (!busy) onClose();
-            }}
+            onCancel={onClose}
             footer={
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <span>
                         已选 {selected.length} 项 · {quoted ? `预估合计 ≈¥${total.toFixed(4)}` : "合计价格待确认"}
                     </span>
                     <div className="flex gap-2">
-                        <Button disabled={busy} onClick={onClose}>
-                            关闭
+                        <Button onClick={onClose}>
+                            {busy ? "关闭并在后台继续" : "关闭"}
                         </Button>
                         {!single && (
                             <Button disabled={busy || !selectedCandidates.length} onClick={() => void execute(false)}>

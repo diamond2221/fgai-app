@@ -631,6 +631,46 @@ func TestOfficialArkAgentPlanPluginsUsePlanPaths(t *testing.T) {
 	}
 }
 
+func TestOfficialSeedancePluginLimitsFollowModelVersion(t *testing.T) {
+	for _, item := range []struct{ pkg, provider string }{
+		{"volcengine-ark-seedance.yingce-plugin", "volcengine-ark-video"},
+		{"volcengine-ark-agent-plan-seedance.yingce-plugin", "volcengine-ark-agent-plan-video"},
+	} {
+		t.Run(item.provider, func(t *testing.T) {
+			adapter := officialPackageAdapter(t, item.pkg, item.provider)
+			for _, model := range []string{"dreamina-seedance-2-5-filter-off", "doubao-seedance-2-5-260628"} {
+				r := GenerationRequest{Model: model, Prompt: "walk", Images: make([]MediaReference, 30), Videos: make([]MediaReference, 10), Audios: make([]MediaReference, 10)}
+				for i := range r.Images {
+					r.Images[i] = MediaReference{URL: "https://example.com/ref.png", Role: "reference_image", Order: i}
+				}
+				for i := range r.Videos {
+					r.Videos[i] = MediaReference{URL: "https://example.com/ref.mp4", Role: "reference_video", Order: i}
+				}
+				for i := range r.Audios {
+					r.Audios[i] = MediaReference{URL: "https://example.com/ref.mp3", Role: "reference_audio", Order: i}
+				}
+				create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: r})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if n := len(manifestTestBody(t, create)["content"].([]any)); n != 51 {
+					t.Fatalf("references truncated: %d", n)
+				}
+				r.Images = append(r.Images, MediaReference{URL: "https://example.com/extra.png"})
+				if _, err := adapter.BuildCreate(context.Background(), RequestContext{Request: r}); err == nil {
+					t.Fatal("31 images accepted")
+				}
+			}
+			for _, model := range []string{"doubao-seedance-2-0-filter-off", "dreamina-seedance-2-0-mini-filter-off"} {
+				r := GenerationRequest{Model: model, Prompt: "walk", Images: make([]MediaReference, 10)}
+				if _, err := adapter.BuildCreate(context.Background(), RequestContext{Request: r}); err == nil {
+					t.Fatal("older model accepted 10 images")
+				}
+			}
+		})
+	}
+}
+
 func TestOfficialGeminiImageMapsQualityToImageSize(t *testing.T) {
 	adapter := officialPackageAdapter(t, "google-gemini-image.yingce-plugin", "gemini-image")
 	tests := []struct {

@@ -40,6 +40,20 @@ describe("video request normalization", () => {
 });
 
 describe("Volcengine Ark full-modal references", () => {
+    test("2.5 transmits all 30 references and rejects 31 before requesting upstream", async () => {
+        const model = "dreamina-seedance-2-5-filter-off";
+        const profile = (await import("../src/lib/model-capabilities")).defaultModelCapabilityConfig("volcengine-ark-video", model);
+        profile.video!.references.maxImages = 30;
+        let requests = 0;
+        let content: Array<{ type: string }> = [];
+        const deps = { transport: { post: async (_url: string, body: {content: typeof content}) => { requests++; content = body.content; return {id:"task-25"}; } }, response: videoResponseTools } as unknown as VideoProviderDeps;
+        const config = {...defaultConfig, interfaceType: "volcengine-ark-video", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", channels: [{id:"ark25", models:[model], modelCosts:[{model, protocol:"volcengine-ark-video", capabilityConfig:profile}]}]};
+        const images = Array.from({length:30}, (_,i)=>({id:`ref-${i}`,name:`ref-${i}`,type:"image/png",dataUrl:"",url:`https://cdn.example.com/${i}.png`}));
+        await createSeedanceTask(deps, config as never, model, "保持身份", images, [], [], {videoEditOperation:"reference_to_video"});
+        expect(content.filter(x=>x.type==="image_url")).toHaveLength(30);
+        await expect(createSeedanceTask(deps, config as never, model, "保持身份", [...images,images[0]], [], [])).rejects.toThrow("30 张");
+        expect(requests).toBe(1);
+    });
     const model = "seedance-2-0-250824";
     const config = {
         ...defaultConfig,

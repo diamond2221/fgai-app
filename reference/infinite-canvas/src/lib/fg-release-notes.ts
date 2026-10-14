@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.6";
+export const CURRENT_RELEASE_VERSION = "1.3.7";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,16 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月14日",
+        items: [
+            { type: "修复", content: "GPT Image 2 与 2.5 按当前模型的实际像素尺寸显示宽高比，恢复 16:9 与 9:16，避免旧预设过滤掉官方尺寸。" },
+            { type: "修复", content: "Seedance 2.5 的执行插件支持 30 张图片、10 段视频、10 段音频；超限提前提示，保留旧版模型限制，不再静默截断参考素材。" },
+            { type: "优化", content: "资产生成窗口提交过程中可以关闭，后台继续处理并自动绑定产物；生成按钮保留提交状态以避免重复任务。" },
+            { type: "修复", content: "画布放大编辑提示词时，@素材选择列表显示在当前弹窗上方，可以选择资产并保留引用。" },
+        ],
+    },
+    {
+        version: "1.3.6",
         date: "2026年10月14日",
         items: [
             { type: "新增", content: "角色、场景和道具支持批量确认与生图，统一选择模型和尺寸，逐项编辑提示词、上传或选择参考图，显示单项与合计人民币预估费用。" },

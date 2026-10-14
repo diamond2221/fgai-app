@@ -90,7 +90,7 @@ export function MentionMenu({
             data-canvas-resource-mention-menu="true"
             className="canvas-resource-mention-menu fixed z-[var(--z-tooltip)]"
             data-placement={position.showAbove ? "top" : "bottom"}
-            style={{ left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight, transform: position.showAbove ? "translateY(-100%)" : undefined }}
+            style={{ left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight, zIndex: mentionOverlayZIndex(anchor), transform: position.showAbove ? "translateY(-100%)" : undefined }}
             onPointerDown={stopCanvasInteraction}
             onMouseDown={stopCanvasInteraction}
             onClick={(event) => event.stopPropagation()}
@@ -246,6 +246,14 @@ export function ReferencePreview({ reference }: { reference: CanvasResourceRefer
 }
 
 export type MentionAnchorRect = Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">;
+
+function mentionOverlayZIndex(anchor: HTMLElement) {
+    const modal = anchor.closest(".ant-modal-wrap");
+    if (!modal) return undefined;
+    // The menu is portaled to body; nested modals can be above the global tooltip token.
+    const layer = Number(window.getComputedStyle(modal).zIndex);
+    return Number.isFinite(layer) ? layer + 1 : undefined;
+}
 
 export function mentionMenuPosition(anchor: HTMLElement, cursorOffset: number, preferredWidth: number) {
     const caret = mentionCaretRect(anchor, cursorOffset);

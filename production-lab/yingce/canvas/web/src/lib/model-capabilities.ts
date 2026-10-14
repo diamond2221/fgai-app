@@ -1,6 +1,6 @@
 import type { ModelProtocol, ModelProtocolWorkflow } from "@/lib/model-protocols";
 import { projectImageParameters, normalizeImageParameters, imageParameterRequest } from "./image-parameters";
-import type { ImageResolutionOption, ImageResolutionTier } from "@/lib/image-resolution-tiers";
+import { buildImageResolutionOptions, type ImageResolutionOption, type ImageResolutionTier } from "@/lib/image-resolution-tiers";
 import { IMAGE_RATIOS, IMAGE_RESOLUTIONS, imagePresetForRatio } from "@/lib/image-size-presets";
 import { kemeiSeedreamPresets } from "./kemei-image-presets";
 import { type WorkflowVideoFieldLike, workflowImageCapabilityConfig, workflowVideoCapabilityConfig } from "./model-capabilities-workflow";
@@ -552,6 +552,8 @@ export function modelCapabilityConfigFor(config: { channels: Array<{ id: string;
                       values,
                       default: defaultValue,
                       allowCustom,
+                      // An explicit pixel catalog must not inherit the fallback's different size table.
+                      presets: configuredSize?.presets ?? (configuredValues && configuredSize?.parameter === "size" ? buildImageResolutionOptions(values) : fallback.image!.size.presets),
                   },
                   resolution: {
                       ...fallback.image!.resolution,
