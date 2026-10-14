@@ -20,15 +20,9 @@
 .creation-chat-strip strong {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;}
 .creation-chat-strip span,.creation-chat-strip p {font-size:11px;opacity:.6;}
 .creation-home-hub .fg-inspiration.is-embedded {max-width:none;width:100%;height:auto;padding:28px 0 0;border-top:1px solid var(--workspace-border,#dfe3df);overflow:visible;background:transparent;}
-.app-user-workspace .creation-home > main.creation-empty-workspace {width:100%!important;padding:24px 0 40px!important;}
-.app-user-workspace .creation-home .creation-home-heading {flex-shrink:0;margin-bottom:12px!important;padding-top:0;}
-.app-user-workspace .creation-home .creation-home-heading {position:relative;width:min(960px,calc(100% - 48px))!important;text-align:left!important;padding-right:120px;}
+.app-user-workspace .creation-home .creation-home-heading {position:relative;flex-shrink:0;}
 .creation-home-history-entry {position:absolute;right:0;top:0;display:flex;align-items:center;gap:7px;font-size:12px;padding:9px 12px;border-radius:10px;background:var(--user-surface-muted,#eef0f1);color:var(--user-ink-muted,#657176);}
-.app-user-workspace .creation-home .creation-home-heading .fg-creation-signature {display:none;}
+.app-user-workspace .creation-home .creation-home-heading .fg-creation-signature {display:flex;}
 .app-user-workspace .creation-home .creation-launchpad {flex-shrink:0;width:min(960px,calc(100% - 48px));}
-.creation-home .creation-home-heading {padding-top:24px;}
-.creation-home .creation-home-heading .fg-creation-signature {margin-bottom:6px;}
-.creation-home .creation-home-heading h1 {font-size:clamp(24px,3vw,34px);}
-.creation-home .creation-launchpad {margin-top:16px;}
 @media(max-width:900px){.creation-canvas-strip{display:flex;overflow-x:auto;padding-bottom:8px;}.creation-canvas-strip-item{min-width:180px;flex:0 0 180px;}.creation-chat-strip{grid-template-columns:repeat(2,minmax(0,1fr));}.creation-home-hub{width:calc(100% - 32px);}}
 @media(prefers-reduced-motion:reduce){.creation-home-hub *{scroll-behavior:auto!important;}}

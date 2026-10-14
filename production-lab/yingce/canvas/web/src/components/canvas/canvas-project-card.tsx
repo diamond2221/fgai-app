@@ -14,6 +14,7 @@ import { MediaPlaceholder } from "@/components/ui/product/media-placeholder";
 import { cn } from "@/lib/utils";
 import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
 import { hasRemoteUserDataSyncSession, loadCanvasProjectForEditing, saveRemoteUserDataNow } from "@/services/user-data-sync";
+import { isCanvasProjectPreviewURL } from "@/lib/canvas/canvas-project-preview-url";
 
 type ProjectPreviewMedia = { node: CanvasNodeData; url: string; storageKey?: string };
 const projectPreviewMediaCache = new WeakMap<CanvasNodeData[], { first?: ProjectPreviewMedia; latest?: ProjectPreviewMedia }>();
@@ -238,7 +239,7 @@ export function projectPreviewMedia(nodes: CanvasNodeData[], preferLatestImage =
         for (const node of nodes) {
             if (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video) continue;
             const url = getNodeMediaUrl(node);
-            if (!isPreviewUrl(url)) continue;
+            if (!isCanvasProjectPreviewURL(url)) continue;
             const media = { node, url, storageKey: node.metadata?.storageKey };
             firstMedia ||= media;
             latestMedia = media;
@@ -296,10 +297,6 @@ function getNodePresentation(node: CanvasNodeData) {
         default:
             return { label: "技能", icon: <Sparkles className="size-3.5" /> };
     }
-}
-
-function isPreviewUrl(value?: string) {
-    return Boolean(value && /^(https?:|blob:|data:image\/|data:video\/|\/api\/)/.test(value));
 }
 
 export function formatProjectTime(value: string) {
