@@ -58,6 +58,7 @@ func (s *Service) UserAssetsPage(userID string, page int, pageSize int, filter U
 	}
 	rawAssets := make([]json.RawMessage, 0, len(assets))
 	for _, asset := range assets {
+		asset = s.canvasDomain().HydrateAssetForClient(userID, asset)
 		payload := clientAssetListPayload(asset)
 		if len(payload) == 0 {
 			continue

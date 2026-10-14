@@ -79,7 +79,7 @@ func (s *Service) UserAsset(userID string, id string) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ClientAssetPayload(*asset), nil
+	return ClientAssetPayload(s.HydrateAssetForClient(userID, *asset)), nil
 }
 
 func (s *Service) UpsertUserAsset(userID string, raw json.RawMessage) (UserDataSummary, error) {
@@ -163,7 +163,7 @@ func (s *Service) UserAssets(userID string) ([]json.RawMessage, error) {
 	}
 	result := make([]json.RawMessage, 0, len(assets))
 	for _, asset := range assets {
-		if payload := ClientAssetPayload(asset); len(payload) > 0 {
+		if payload := ClientAssetPayload(s.HydrateAssetForClient(userID, asset)); len(payload) > 0 {
 			result = append(result, payload)
 		}
 	}

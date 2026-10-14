@@ -30,5 +30,6 @@ COPY SOURCE.md /app/fg-source/SOURCE.md
 RUN tar -czf /app/fg-source.tar.gz -C /app/fg-source .
 ENV HOME=/state/home ARCREEL_DATA_DIR=/workspace DATABASE_URL=sqlite+aiosqlite:////state/arcreel.db AUTH_ENABLED=false
 USER fg
+HEALTHCHECK --start-period=300s --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:1241/health || exit 1
 RUN /app/.venv/bin/python -c "from pathlib import Path; compile(Path('/app/fg-entry.py').read_text(), 'fg-entry', 'exec'); import company_recycle; company_recycle.install()"
 CMD ["/app/.venv/bin/python", "/app/fg-entry.py"]

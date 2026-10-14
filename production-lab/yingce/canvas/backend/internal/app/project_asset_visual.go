@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"yingce/backend/internal/canvas"
 	"yingce/backend/internal/model"
 )
 
@@ -23,6 +24,7 @@ func (s *Service) UpdateProjectAssetVisual(userID, projectID, assetID string, re
 		return ProjectAssetSummary{}, BadAuthRequest("此入口用于场景和道具设定")
 	}
 	resourceID := strings.TrimSpace(req.ResourceID)
+	var visualResource *model.Resource
 	if resourceID == "" && req.Definition == nil {
 		return ProjectAssetSummary{}, BadAuthRequest("请选择图片或填写设定")
 	}
@@ -34,6 +36,7 @@ func (s *Service) UpdateProjectAssetVisual(userID, projectID, assetID string, re
 		if resource.Kind != "image" || resource.Status != model.ResourceStatusReady {
 			return ProjectAssetSummary{}, BadAuthRequest("请选择已保存完成的图片")
 		}
+		visualResource = resource
 	}
 	storageKey, _, _, _ := projectAssetPreview(asset.PayloadJSON)
 	if resourceID != "" && storageKey == "resource:"+resourceID && req.Definition == nil {
@@ -68,7 +71,7 @@ func (s *Service) UpdateProjectAssetVisual(userID, projectID, assetID string, re
 	}
 	data["content"] = projectVisualDefinitionText(definition)
 	if resourceID != "" {
-		data["storageKey"] = "resource:" + resourceID
+		canvas.CompleteImageAssetData(data, *visualResource)
 		asset.Kind = "image"
 	}
 	now := time.Now()
