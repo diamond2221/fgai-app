@@ -60,7 +60,7 @@ export function createArcReelServer({pool,platformActor,canvasSession,platformOr
     res.writeHead(remote.statusCode||502,publicArcResponseHeaders(remote.headers,target));pipeline(remote,res,()=>{});
    });
    // Limit a dead runtime's connection/header wait, while preserving long SSE streams.
-   const headerDeadline=setTimeout(()=>upstream.destroy(new Error('Runtime response timeout')),20000);
+   const headerDeadline=setTimeout(()=>upstream.destroy(new Error('Runtime response timeout')),['GET','HEAD','OPTIONS'].includes(req.method)?20000:180000);
    upstream.on('close',()=>clearTimeout(headerDeadline));
    upstream.on('error',()=>{if(!res.headersSent){if(!waitingPage(req,res,'服务正在恢复，稍后自动重试。'))failure(res,503,'导演工作台正在恢复，请稍后刷新');}else res.destroy();});
    req.on('aborted',()=>upstream.destroy());res.on('close',()=>{if(!res.writableEnded)upstream.destroy();});pipeline(req,upstream,()=>{});

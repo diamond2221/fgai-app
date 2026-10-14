@@ -73,7 +73,7 @@ func (s *Service) hydrateProviderMedia(userID string, media *providerMedia, poli
 		}
 		media.URL = signedURL
 		media.DataURL = ""
-		media.MimeType = firstNonEmpty(media.MimeType, resource.MimeType)
+		media.MimeType = firstNonEmpty(resource.MimeType, media.MimeType)
 		media.Bytes = resource.Size
 		media.Width = resource.Width
 		media.Height = resource.Height
@@ -107,7 +107,7 @@ func (s *Service) hydrateProviderMedia(userID string, media *providerMedia, poli
 	if policy.imageOnly && len(data) == 0 {
 		return errors.New("看图资源内容为空")
 	}
-	mimeType := normalizedMediaMimeType(firstNonEmpty(media.MimeType, resource.MimeType), data)
+	mimeType := normalizedMediaMimeType(firstNonEmpty(resource.MimeType, media.MimeType), data)
 	media.DataURL = dataURL(mimeType, data)
 	if policy.imageOnly {
 		media.URL = ""
@@ -130,7 +130,7 @@ func resourceUsesObjectStorage(resource *model.Resource) bool {
 
 func normalizedMediaMimeType(declared string, data []byte) string {
 	declared = strings.TrimSpace(strings.Split(declared, ";")[0])
-	if declared != "" && declared != "application/octet-stream" {
+	if declared != "" && declared != "application/octet-stream" && !strings.Contains(declared, "*") {
 		return declared
 	}
 	detected := strings.TrimSpace(strings.Split(http.DetectContentType(data), ";")[0])

@@ -2,6 +2,26 @@ package app
 
 import "testing"
 
+func TestFGProjectReferencePlaceholderUsesResolvedResourceMIME(t *testing.T) {
+	r := VideoReferenceConfig{ImageFormats: []string{"png", "jpeg", "webp"}}
+	in := canvasGenerationInput{ReferenceImages: []providerMedia{{Type: "image/*", StorageKey: "resource:character"}}}
+	if err := validateFGReferenceLimits(r, in); err != nil {
+		t.Fatalf("unresolved project reference: %v", err)
+	}
+	in.ReferenceImages[0].MimeType = "image/png"
+	if err := validateFGReferenceLimits(r, in); err != nil {
+		t.Fatal(err)
+	}
+	in.ReferenceImages[0].MimeType = "image/avif"
+	if validateFGReferenceLimits(r, in) == nil {
+		t.Fatal("resolved unsupported format must be rejected")
+	}
+	in.ReferenceImages[0].Type = "image/png"
+	if validateFGReferenceLimits(r, in) == nil {
+		t.Fatal("client type must not override resolved MIME")
+	}
+}
+
 func TestFGWanReferenceAndOutputDurationBudget(t *testing.T) {
 	r := VideoReferenceConfig{MaxInputOutputDuration: 30, MinImageSide: 240, MaxImageSide: 8000, MaxVideoSide: 4096}
 	in := canvasGenerationInput{Config: providerConfig{VideoSeconds: "20"}, ReferenceVideos: []providerMedia{{DurationMs: 10000, Width: 1920, Height: 1080}}}

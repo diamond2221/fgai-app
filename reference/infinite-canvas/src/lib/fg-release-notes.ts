@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.5";
+export const CURRENT_RELEASE_VERSION = "1.3.6";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,16 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月14日",
+        items: [
+            { type: "新增", content: "角色、场景和道具支持批量确认与生图，统一选择模型和尺寸，逐项编辑提示词、上传或选择参考图，显示单项与合计人民币预估费用。" },
+            { type: "优化", content: "资产提示词继承项目全局画风与世界观，保留明确人物身份与物种；历史图片未记录提示词时明确显示重新生成草稿。" },
+            { type: "修复", content: "分镜参考素材使用资源库的真实格式校验，修复图片通配类型被误判为不支持的问题。" },
+            { type: "修复", content: "小说转视频恢复风格示例图；创建项目遇到响应超时后核对同一项目，保留重试标识，避免已创建却提示失败或重复创建。" },
+        ],
+    },
+    {
+        version: "1.3.5",
         date: "2026年10月14日",
         items: [
             { type: "新增", content: "新增图片与视频工作台，提供商品、服装、人物及视频制作等 118 项工具与提示词预设，管理员可管理工具和开放入口。" },

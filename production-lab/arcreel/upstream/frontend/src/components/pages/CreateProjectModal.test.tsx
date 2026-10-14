@@ -435,6 +435,11 @@ describe("CreateProjectModal", () => {
     await waitFor(() => expect(useAppStore.getState().toast?.text).toBe("创建项目失败：boom"));
     expect(navigateMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "创建项目" })).toBeEnabled();
+      const firstName = vi.mocked(API.createProject).mock.calls[0][0].name;
+      expect(firstName).toMatch(/^proj-[a-f0-9]{32}$/);
+      fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+      await waitFor(() => expect(API.createProject).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(API.createProject).mock.calls[1][0].name).toBe(firstName);
   });
 
   it("uploads the custom style image after creating the project", async () => {

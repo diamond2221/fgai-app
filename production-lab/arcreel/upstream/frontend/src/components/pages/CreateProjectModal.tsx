@@ -88,6 +88,7 @@ export function CreateProjectModal() {
   const hintId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const createRequestNameRef = useRef<string | null>(null);
 
   const [step, setStep] = useState<WizardStep>(1);
   const [basics, setBasics] = useState<WizardBasicsValue>({
@@ -249,6 +250,7 @@ export function CreateProjectModal() {
       }
 
       const resp = await API.createProject({
+        name: createRequestNameRef.current ??= `proj-${crypto.randomUUID().replaceAll("-", "")}`,
         title: basics.title.trim(),
         content_mode: contentMode,
         aspect_ratio: basics.aspectRatio,

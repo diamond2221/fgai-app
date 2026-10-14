@@ -64,6 +64,6 @@ function characterStyleConstraint(projectStyle?: ProjectStylePrompt) {
     });
     return [
         `项目画风：${projectStyle.title}。角色造型、配色、服装材质与最终渲染媒介必须遵循以下规范：`,
-        ...rules,
+        ...(rules.length ? rules : [projectStyle.prompt]),
     ].join("\n");
 }

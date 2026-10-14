@@ -3,8 +3,18 @@ import { describe, expect, test } from "bun:test";
 import { canvasResourceMentionToken } from "@/lib/canvas/canvas-resource-references";
 import type { ProjectAsset, ProjectDetail } from "@/services/api/projects";
 import { buildShotAssetReferenceContext, ensureShotAssetMentionPrompt, inferShotVisualAssets, resolveShotAssetMentionPrompt } from "@/pages/projects/detail/workflow-shot-references";
+import { assertVideoCapability } from "@/services/api/video-validation";
+import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 
 describe("workflow shot asset references", () => {
+    test("project reference placeholders are not mistaken for an unsupported image codec", () => {
+        const context = buildShotAssetReferenceContext(detail(), "shot-1");
+        const profile = defaultModelCapabilityConfig().video!;
+        profile.references.imageFormats = ["png", "jpeg", "webp"];
+        profile.references.maxImages = 9;
+        expect(() => assertVideoCapability(profile, context.referenceImages, [], [], String(profile.duration.default))).not.toThrow();
+        expect(() => assertVideoCapability(profile, [{ ...context.referenceImages[0], type: "image/avif" }], [], [], String(profile.duration.default))).toThrow("参考素材格式");
+    });
     test("auto matches confirmed visuals by segment names, ignoring unmentioned assets and text-only definitions", () => {
         const assets = detail().assets;
         assets.push({ ...assets[0], id: "text-prop", title: "旧信封", category: "prop", mediaType: "text", storageKey: undefined });

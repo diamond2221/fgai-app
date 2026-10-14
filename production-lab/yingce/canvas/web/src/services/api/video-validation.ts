@@ -28,7 +28,7 @@ export function assertVideoCapability(
     const checkFormat=(type:string|undefined,formats:string[]|undefined)=>{
         let kind=(type||'').toLowerCase().split(';')[0].split('/').pop()||'';
         kind=({quicktime:'mov',mpeg:'mp3','x-wav':'wav','x-ms-bmp':'bmp'} as Record<string,string>)[kind]||kind;
-        if (kind && kind!=='octet-stream' && formats?.length && !formats.includes(kind)) throw new Error('参考素材格式不在当前模型支持范围内');
+        if (kind && kind !== '*' && kind!=='octet-stream' && formats?.length && !formats.includes(kind)) throw new Error('参考素材格式不在当前模型支持范围内');
     };
     for (const image of references) {
         if (limits.imageBytesExclusive && limits.maxImageBytes>0 && (image.bytes||0)>=limits.maxImageBytes) throw new Error('参考图片必须小于当前模型单图大小上限');

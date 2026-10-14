@@ -13,18 +13,12 @@ import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { CanvasFolderPreview } from "@/components/canvas/canvas-folder-preview";
 import { CANVAS_FOLDER_THEME_OPTIONS, resolveCanvasFolderTheme } from "@/lib/canvas/canvas-folder-theme";
-import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
 import { CHARACTER_VOICE_FORMAT_LABEL, CHARACTER_VOICE_UPLOAD_ACCEPT, characterVoiceFormatName, characterVoiceTitleFromFileName, isSupportedCharacterVoiceFile } from "@/lib/character-voice-formats";
 import { ASSET_CATEGORIES, defaultAssetCategoryForKind, normalizeAssetCategory } from "@/lib/asset-category";
 import { resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey } from "@/services/api/resources";
 import { downloadBrowserMedia } from "@/services/browser-download";
 import { uploadMediaFile } from "@/services/file-storage";
 import { uploadImage } from "@/services/image-storage";
-import { ModelPicker } from "@/components/model-picker";
-import { ImageSettingsPanel } from "@/components/image-settings-panel";
-import { FGPricePreview } from "@/components/fg-price-preview";
-import { canvasThemes } from "@/lib/canvas-theme";
-import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import {
     bindProjectCharacterVoice,
     confirmProjectAssetCandidate,
@@ -32,7 +26,6 @@ import {
     createProjectAssetVersion,
     createProjectCharacter,
     deleteProjectAssetFolder,
-    getProjectCharacter,
     linkProjectAsset,
     listProjectAssetCandidates,
     listProjectAssetFolders,
@@ -50,13 +43,13 @@ import {
 } from "@/services/api/projects";
 import { saveRemoteUserDataNow } from "@/services/user-data-sync";
 import { useAssetStore, type Asset, type AssetCategory, type AssetStatus, type EntityAsset, type ImageAsset } from "@/stores/use-asset-store";
-import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { listGenerationTasks } from "@/services/api/task-center";
 import { CanvasNodeType, type CanvasFolderStyle, type CanvasFolderTheme, type CanvasNodeData } from "@/types/canvas";
 
 import { ProjectCharacterCard } from "./project-character-card";
 import { projectCharacterCover } from "./project-character-cover";
 import { linkSelectedProjectAssets } from "./project-asset-linking";
-import { characterTurnaroundConfig, generateCharacterTurnaround, generateProjectVisual } from "./project-character-media";
+import { ProjectAssetGenerationModal } from "./project-asset-generation-modal";
 import { categoryLabels, categoryLabel, mediaLabel, StatusPill, formatTime, textValue, type ProjectDetailViewProps } from "./shared";
 
 const categories = ["all", ...ASSET_CATEGORIES];
@@ -76,8 +69,6 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     const personalAssets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updatePersonalAsset = useAssetStore((state) => state.updateAsset);
-    const effectiveConfig = useEffectiveConfig();
-    const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const [category, setCategory] = useState("all");
     const [folderId, setFolderId] = useState("");
     const [page, setPage] = useState(1);
@@ -91,11 +82,9 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     const [addOpen, setAddOpen] = useState(false);
     const [editorAsset, setEditorAsset] = useState<ProjectAsset | "new" | null>(null);
     const [imageAsset, setImageAsset] = useState<ProjectAsset | null>(null);
-    const [turnaroundAsset, setTurnaroundAsset] = useState<ProjectAsset | null>(null);
+    const [generationTarget, setGenerationTarget] = useState<ProjectAsset | "batch" | null>(null);
     const [visualEditor, setVisualEditor] = useState<ProjectAsset | null>(null);
     const [visualDescription, setVisualDescription] = useState("");
-    const [turnaroundConfig, setTurnaroundConfig] = useState(() => characterTurnaroundConfig(effectiveConfig));
-    const theme = canvasThemes[useActiveTheme()] || canvasThemes.dark;
     const externalAssetSources = useExternalAssetSources(addOpen || Boolean(imageAsset));
     const [voiceAsset, setVoiceAsset] = useState<ProjectAsset | null>(null);
     const [previewAsset, setPreviewAsset] = useState<ProjectAsset | null>(null);
@@ -104,6 +93,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     const [voiceInstructions, setVoiceInstructions] = useState("");
     const [form] = Form.useForm<CharacterForm>();
     const queryClient = useQueryClient();
+    const activeTasks = useQuery({ queryKey: ["project", detail.project.id, "asset-generation-tasks"], queryFn: () => listGenerationTasks(500, {projectId:detail.project.id,activeOnly:true}), refetchInterval:5000 });
 
     const assetsQuery = useQuery({
         queryKey: ["project", detail.project.id, "assets", page, pageSize, category, folderId, debouncedKeyword],
@@ -115,6 +105,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
             query: debouncedKeyword || undefined,
         }),
         placeholderData: keepPreviousData,
+        refetchInterval: activeTasks.data?.length ? 5000 : false,
     });
     const foldersQuery = useQuery({ queryKey: ["project", detail.project.id, "asset-folders"], queryFn: () => listProjectAssetFolders(detail.project.id) });
     // 左侧分类计数不能依赖跟随当前 tab 的候选查询，否则"角色"的数字会随所在 tab 的待确认数漂移；
@@ -236,7 +227,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
         filters: { mutationKey: ["project-character-turnaround", detail.project.id], status: "pending" },
         select: (mutation) => mutation.state.variables as ProjectAsset | undefined,
     });
-    const generatingAssetIds = new Set(generatingAssets.map((asset) => asset?.id).filter((id): id is string => Boolean(id)));
+    const generatingAssetIds = new Set([...generatingAssets.map((asset) => asset?.id).filter((id): id is string => Boolean(id)), ...(activeTasks.data||[]).flatMap(task=>{try{const metadata=JSON.parse(task.inputJson||"{}").metadata||{};return [metadata.assetId,metadata.characterAssetId].filter(Boolean);}catch{return [];}})]);
 
     const done = (content: string) => { refreshProject(); message.success(content); };
     const failed = (fallback: string) => (error: unknown) => message.error(error instanceof Error ? error.message : fallback);
@@ -332,21 +323,6 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
         onSuccess: (result) => { syncPersonalCharacterProjection(result.asset); setEditorAsset(null); done(editorAsset === "new" ? "角色卡已创建" : "角色设定已保存并生成新版本"); },
         onError: failed("角色保存失败"),
     });
-    const generateMutation = useMutation({
-        mutationKey: ["project-character-turnaround", detail.project.id],
-        mutationFn: async (asset: ProjectAsset) => {
-            const model = turnaroundConfig.model;
-            const config = { ...turnaroundConfig, imageModel: model };
-            if (!isAiConfigReady(config, model)) throw new Error("请先在设置中配置可用的图片模型");
-            const projectStyle = resolveProjectCanvasStyle(detail.project.stylePresetId, detail.project.styleProfileJson);
-            if (asset.category !== "character") return generateProjectVisual({ projectId: detail.project.id, asset, projectStyle, config });
-            if (!asset.character) throw new Error("角色版本信息不完整");
-            await generateCharacterTurnaround({ projectId: detail.project.id, assetId: asset.id, versionId: asset.character.versionId, name: asset.title, definition: asset.character.definition, projectStyle, config });
-            return getProjectCharacter(detail.project.id, asset.id);
-        },
-        onSuccess: (result) => { syncPersonalCharacterProjection(result.asset); setTurnaroundAsset(null); done(result.asset.category === "character" ? "三视图已生成并绑定到新角色版本" : "设定图片已生成并绑定，原设定与历史版本已保留"); },
-        onError: failed("设定图生成失败"),
-    });
     const saveVisualDefinition = useMutation({
         mutationFn: async () => {
             if (!visualEditor || !visualDescription.trim()) throw new Error("请填写设定描述");
@@ -380,7 +356,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     };
     const openImages = (asset: ProjectAsset) => setImageAsset(asset);
     const openVisualEditor = (asset: ProjectAsset) => { setVisualEditor(asset); setVisualDescription(textValue(asset.definition?.description) || asset.previewText || ""); };
-    const openTurnaround = (asset: ProjectAsset) => { setTurnaroundConfig(characterTurnaroundConfig(effectiveConfig)); setTurnaroundAsset(asset); };
+    const openTurnaround = (asset: ProjectAsset) => setGenerationTarget(asset);
     const openVoice = (asset: ProjectAsset) => { const sampleResourceId = asset.character?.voice?.profile.sampleResourceId || ""; setVoiceAsset(asset); setVoiceSample(sampleResourceId ? { resourceId: sampleResourceId, name: asset.character?.voice?.profile.name || "当前声音", url: resourceFileUrl(sampleResourceId) } : null); setVoiceInstructions(asset.character?.voice?.instructions || ""); };
     const openFolderEditor = (folder?: ProjectAssetFolder, parentId = folderId === ALL_FOLDERS ? "" : folderId) => {
         setFolderEditor({ folder, parentId: folder?.parentId || parentId });
@@ -425,7 +401,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 <div className="flex min-w-0 items-center gap-3">
                     <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-                            <h2 className="text-[var(--fs-heading-lg)] font-semibold leading-6">角色与资产</h2>
+                            <h2 className="text-[var(--fs-heading-lg)] font-semibold leading-6">角色与资产</h2><Button size="small" icon={<Sparkles className="size-3.5"/>} onClick={()=>setGenerationTarget("batch")}>批量确认 / 生图</Button>
                             <span className="rounded bg-foreground/[.055] px-1.5 py-1 text-[var(--fs-tiny)] font-medium tabular-nums text-foreground/45">{totalAssetCount} 项已确认</span>
                         </div>
                         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[var(--fs-label)] text-foreground/48">
@@ -516,15 +492,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
             <ProjectAssetPreviewModal asset={previewAsset} personalAsset={previewAsset ? personalAssets.find((item) => item.id === previewAsset.id) : undefined} onClose={() => setPreviewAsset(null)} onDownload={() => previewAsset && downloadPreviewAsset(previewAsset)} onReplaceImage={() => { if (!previewAsset || !["character", "environment", "prop"].includes(previewAsset.category)) return; setPreviewAsset(null); openImages(previewAsset); }} />
             <Modal className="workspace-modal workspace-modal-compact" title={`编辑设定 · ${visualEditor?.title || ""}`} open={Boolean(visualEditor)} okText="保存设定" cancelText="取消" confirmLoading={saveVisualDefinition.isPending} onCancel={() => setVisualEditor(null)} onOk={() => saveVisualDefinition.mutate()}><p className="mb-3 text-sm text-foreground/55">描述外观、材质、空间或光线。保存为新版本，保留原设定和已绑定图片。</p><Input.TextArea rows={8} value={visualDescription} onChange={(event) => setVisualDescription(event.target.value)} maxLength={10000} placeholder="填写场景或道具设定" /></Modal>
             <CharacterEditorModal open={Boolean(editorAsset)} editing={editorAsset !== "new"} form={form} loading={saveCharacter.isPending} onClose={() => setEditorAsset(null)} onSave={() => form.validateFields().then((values) => saveCharacter.mutate(values))} />
-            <Modal className="workspace-modal workspace-modal-compact" title={`生成${turnaroundAsset?.category === "character" ? "角色三视图" : "设定图片"} · ${turnaroundAsset?.title || ""}`} open={Boolean(turnaroundAsset)} okText={turnaroundAsset?.category === "character" ? "生成一张三视图" : "生成一张设定图"} cancelText="取消" confirmLoading={generateMutation.isPending} onCancel={() => { if (!generateMutation.isPending) setTurnaroundAsset(null); }} onOk={() => { if (turnaroundAsset) generateMutation.mutate(turnaroundAsset); }}>
-                <div className="grid gap-4">
-                    <p className="text-sm text-foreground/60">{turnaroundAsset?.category === "character" ? "根据已保存的角色设定和项目画风生成正面、侧面、背面的设定图。可先通过角色卡的编辑按钮调整外貌与三视图补充约束。" : "根据已保存的场景或道具设定和项目画风生成参考图片。可先编辑设定，生成后自动绑定为新版本，原设定与历史图片保留。"}</p>
-                    <ModelPicker config={turnaroundConfig} value={turnaroundConfig.model} capability="image" onChange={(model) => setTurnaroundConfig(characterTurnaroundConfig({ ...effectiveConfig, imageModel: model, model }))} />
-                    <ImageSettingsPanel config={turnaroundConfig} theme={theme} showCount={false} onConfigChange={(key, value) => setTurnaroundConfig((current) => ({ ...current, [key]: value }))} />
-                    <FGPricePreview config={turnaroundConfig} model={turnaroundConfig.model} mode="image" />
-                    <Button onClick={() => { if (turnaroundAsset) { setImageAsset(turnaroundAsset); setTurnaroundAsset(null); } }}>{turnaroundAsset?.category === "character" ? "改为选择或上传已有三视图" : "改为选择或上传已有图片"}</Button>
-                </div>
-            </Modal>
+            {generationTarget&&<ProjectAssetGenerationModal detail={detail} single={generationTarget==="batch"?undefined:generationTarget} onClose={()=>setGenerationTarget(null)} onRefresh={()=>{void queryClient.invalidateQueries({queryKey:["project",detail.project.id]});refreshProject();}}/>}
             <Modal className="workspace-modal workspace-modal-compact" title={folderEditor?.folder ? "重命名文件夹" : "新建文件夹"} open={Boolean(folderEditor)} okText={folderEditor?.folder ? "保存" : "创建"} cancelText="取消" okButtonProps={{ loading: createFolderMutation.isPending || renameFolderMutation.isPending }} onCancel={() => { setFolderEditor(null); setFolderName(""); }} onOk={saveFolder}>
                 <div className="grid gap-2"><span className="text-[var(--fs-label)] text-foreground/48">位置：{folderEditor ? projectAssetFolderParentLabel(assetFolders, folderEditor.parentId) : ""}</span><Input autoFocus maxLength={60} value={folderName} placeholder="输入文件夹名称" onChange={(event) => setFolderName(event.target.value)} onPressEnter={saveFolder} /></div>
             </Modal>

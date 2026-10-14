@@ -173,6 +173,7 @@ import type {
   UpdateAgentCredentialRequest,
 } from "@/types/agent-credential";
 import i18n from "@/i18n";
+import { recoverProjectCreation } from "./api/project-creation-recovery";
 import { openSseStream, type SseStreamHandle } from "@/utils/sse-stream";
 import {
   API_BASE,
@@ -482,10 +483,16 @@ class API {
   static async createProject(
     payload: CreateProjectPayload,
   ): Promise<{ success: boolean; name: string; project: ProjectData }> {
-    return this.request("/projects", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    try {
+      return await this.request("/projects", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      if (!payload.name) throw error;
+      const result = await recoverProjectCreation(payload.name, payload.title, name => this.getProject(name), error);
+      return { success: true, name: payload.name, project: result.project };
+    }
   }
 
   static async getProject(

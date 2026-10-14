@@ -61,7 +61,7 @@ func validateFGReferenceLimits(r VideoReferenceConfig, input canvasGenerationInp
 		case "x-ms-bmp":
 			kind = "bmp"
 		}
-		if kind == "" || kind == "octet-stream" || len(formats) == 0 {
+		if kind == "" || kind == "*" || kind == "octet-stream" || len(formats) == 0 {
 			return nil
 		}
 		if !containsCapabilityString(formats, kind) {
@@ -76,7 +76,7 @@ func validateFGReferenceLimits(r VideoReferenceConfig, input canvasGenerationInp
 		if err := checkShape(m.Width, m.Height, false); err != nil {
 			return err
 		}
-		if err := checkFormat(m.Type, r.ImageFormats); err != nil {
+		if err := checkFormat(firstNonEmpty(m.MimeType, m.Type), r.ImageFormats); err != nil {
 			return err
 		}
 	}
@@ -88,7 +88,7 @@ func validateFGReferenceLimits(r VideoReferenceConfig, input canvasGenerationInp
 		if err := checkShape(m.Width, m.Height, true); err != nil {
 			return err
 		}
-		if err := checkFormat(m.Type, r.VideoFormats); err != nil {
+		if err := checkFormat(firstNonEmpty(m.MimeType, m.Type), r.VideoFormats); err != nil {
 			return err
 		}
 	}
@@ -97,7 +97,7 @@ func validateFGReferenceLimits(r VideoReferenceConfig, input canvasGenerationInp
 		if r.MinAudioDuration > 0 && m.DurationMs > 0 && m.DurationMs < int64(r.MinAudioDuration)*1000 {
 			return BadAuthRequest("参考音频时长低于当前模型最短限制")
 		}
-		if err := checkFormat(m.Type, r.AudioFormats); err != nil {
+		if err := checkFormat(firstNonEmpty(m.MimeType, m.Type), r.AudioFormats); err != nil {
 			return err
 		}
 	}
