@@ -56,6 +56,25 @@ func TestPersonalGPTCredentialsAreEncryptedAndOwnerScoped(t *testing.T) {
 	if _, err = svc.personalGPTProvider(cfg, "bob"); err == nil {
 		t.Fatal("unconfigured account used another key")
 	}
+	proxy, err := svc.SystemChannelForUser("alice", "personal-gpt")
+	if err != nil || proxy.APIKey != "alice-test-key" {
+		t.Fatal("proxy did not use owner key", err)
+	}
+	if _, err = svc.SystemChannelForUser("bob", "personal-gpt"); err == nil {
+		t.Fatal("proxy crossed owner boundary")
+	}
+	body, err := svc.PersonalGPTProxyDefaults(proxy, []byte(`{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"test"}]}`))
+	if err != nil || !strings.Contains(string(body), `"reasoning_effort":"high"`) {
+		t.Fatal("missing high reasoning in proxy", err)
+	}
+	var catalog model.ModelChannel
+	db.First(&catalog, "id = ?", "personal-gpt")
+	if catalog.APIKey != "" {
+		t.Fatal("personal key copied into shared channel")
+	}
+	if err = svc.requirePersonalGPTForTask("bob", map[string]any{"config": map[string]any{"model": "gpt-6.1-sol", "channelId": "personal-gpt"}}); err == nil {
+		t.Fatal("unconfigured task admitted")
+	}
 	if err = svc.DeletePersonalGPT("alice"); err != nil {
 		t.Fatal(err)
 	}

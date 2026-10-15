@@ -262,7 +262,7 @@ func RegisterSystemProxyRoutes(r *gin.RouterGroup, svc *service.Service) {
 			failService(c, err)
 			return
 		}
-		channel, err := svc.SystemChannel(c.Param("channelId"))
+		channel, err := svc.SystemChannelForUser(user.ID, c.Param("channelId"))
 		if err != nil {
 			failService(c, err)
 			return
@@ -286,7 +286,7 @@ func SystemProxyNoRouteHandler(svc *service.Service) gin.HandlerFunc {
 			failService(c, err)
 			return
 		}
-		channel, err := svc.SystemChannel(channelID)
+		channel, err := svc.SystemChannelForUser(user.ID, channelID)
 		if err != nil {
 			failService(c, err)
 			return
@@ -378,6 +378,11 @@ func proxySystemRequestPath(c *gin.Context, svc *service.Service, user *model.Us
 	}
 	if err := authorizeSystemProxy(channel, protocol, c.Request.Method, path, c.GetHeader("Content-Type"), body); err != nil {
 		fail(c, http.StatusForbidden, err)
+		return
+	}
+	body, err = svc.PersonalGPTProxyDefaults(channel, body)
+	if err != nil {
+		failService(c, err)
 		return
 	}
 	if channelModel != nil && channelModel.BillingMode == "token" && protocol == model.ChannelInterfaceChatCompletion {

@@ -84,7 +84,7 @@ func (s *Service) DeletePersonalGPT(userID string) error {
 	return s.repo.DeleteSystemSetting(personalGPTSettingKey(userID))
 }
 func (s *Service) personalGPTProvider(config providerConfig, userID string) (providerConfig, error) {
-	if config.Model != "gpt-6.1-sol" {
+	if config.Model != "gpt-6.1-sol" || config.ChannelID == "" {
 		return config, nil
 	}
 	// Only a server-owned catalog route opts in. Never take an owner or key from
@@ -115,6 +115,36 @@ func (s *Service) personalGPTProvider(config providerConfig, userID string) (pro
 	config.SecretKey = ""
 	config.Headers = nil
 	return config, nil
+}
+
+// Synchronous proxy and queued generation resolve the same authenticated
+// owner's credentials. The channel copy is never written back to the catalog.
+func (s *Service) SystemChannelForUser(userID, channelID string) (*model.ModelChannel, error) {
+	channel, err := s.SystemChannel(channelID)
+	if err != nil || channel.Name != personalGPTChannelName {
+		return channel, err
+	}
+	config, err := s.personalGPTProvider(providerConfig{Model: "gpt-6.1-sol", ChannelID: channelID}, userID)
+	if err != nil {
+		return nil, err
+	}
+	copy := *channel
+	copy.BaseURL, copy.APIKey, copy.SecretKey, copy.HeadersJSON = config.BaseURL, config.APIKey, "", "[]"
+	return &copy, nil
+}
+
+func (s *Service) PersonalGPTProxyDefaults(channel *model.ModelChannel, body []byte) ([]byte, error) {
+	if channel.Name != personalGPTChannelName || len(body) == 0 {
+		return body, nil
+	}
+	var request map[string]any
+	if json.Unmarshal(body, &request) != nil {
+		return nil, BadAuthRequest("GPT 请求必须是 JSON 对象")
+	}
+	if request["model"] == "gpt-6.1-sol" {
+		request["reasoning_effort"] = "high"
+	}
+	return json.Marshal(request)
 }
 func (s *Service) requirePersonalGPTForTask(userID string, input map[string]any) error {
 	config, _ := input["config"].(map[string]any)
