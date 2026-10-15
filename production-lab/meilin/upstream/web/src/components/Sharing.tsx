@@ -1,0 +1,8 @@
+import {useEffect,useRef,useState} from 'react';
+import {api,Drama} from '../api';
+export default function Sharing({drama,onClose}:{drama:Drama;onClose:()=>void}){
+ const ref=useRef<HTMLDialogElement>(null),[members,setMembers]=useState<{user_id:string;role:string}[]>([]),[email,setEmail]=useState(''),[role,setRole]=useState('viewer'),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ useEffect(()=>{ref.current?.showModal();api.members(drama.id).then(setMembers).catch(e=>setError(e.message));},[drama.id]);
+ const share=async(value:{email?:string;userId?:string;role:string})=>{setBusy(true);setError('');try{setMembers(await api.share(drama.id,value));setEmail('');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
+ return <dialog ref={ref} className="drawer" onClose={onClose} onCancel={onClose} aria-label="分享剧目"><div className="drawer-in"><header className="drawer-head"><h2>分享剧目</h2><button className="icon-btn" onClick={onClose} aria-label="关闭分享">×</button></header><div className="drawer-body"><p>仅向指定 FG 成员开放。编辑成员自行确认生成，费用计入其个人月度额度。</p><form onSubmit={e=>{e.preventDefault();share({email,role});}}><label>FG 成员邮箱<input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><label>权限<select value={role} onChange={e=>setRole(e.target.value)}><option value="viewer">只读</option><option value="editor">可编辑</option></select></label><button className="btn" disabled={busy}>添加成员</button></form>{error&&<p role="alert">{error}</p>}{members.map(m=><p key={m.user_id}>{m.user_id} · {m.role==='editor'?'可编辑':'只读'} <button disabled={busy} className="btn ghost small" onClick={()=>share({userId:m.user_id,role:'remove'})}>取消分享</button></p>)}</div></div></dialog>;
+}

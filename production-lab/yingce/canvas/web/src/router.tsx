@@ -36,6 +36,7 @@ const SystemPerformancePage = lazy(() => import("@/pages/admin/settings/system-p
 const FGProductionPage = lazy(() => import("@/pages/fg-production"));
 const AdvertisingPage = lazy(() => import("@/pages/advertising"));
 const ArcReelPage = lazy(() => import("@/pages/arcreel"));
+const MeilinPage = lazy(() => import("@/pages/meilin"));
 const FGAudioToolsPage = lazy(() => import("@/pages/fg-audio-tools"));
 const FGInspirationPage = lazy(() => import("@/pages/fg-inspiration"));
 const FGFinancePage = lazy(() => import("@/pages/fg-production/finance"));
@@ -114,6 +115,7 @@ export const router = createBrowserRouter([
             { path: "/fg-production", element: <RequireAuth>{deferred(<FGProductionPage />)}</RequireAuth> },
             { path: "/advertising", element: <RequireAuth>{deferred(<AdvertisingPage />)}</RequireAuth> },
             { path: "/arcreel", element: <RequireAuth>{deferred(<ArcReelPage />)}</RequireAuth> },
+            { path: "/meilin", element: <RequireAuth>{deferred(<MeilinPage />)}</RequireAuth> },
             { path: "/fg-audio-tools", element: <RequireAuth>{deferred(<FGAudioToolsPage />)}</RequireAuth> },
             { path: "/fg-inspiration", element: <RequireAuth>{deferred(<FGInspirationPage />)}</RequireAuth> },
             { path: "/fg-finance", element: <RequireAuth>{deferred(<FGFinancePage />)}</RequireAuth> },

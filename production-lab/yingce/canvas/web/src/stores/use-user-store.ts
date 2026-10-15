@@ -30,6 +30,7 @@ export type RuntimeLimits = {
 };
 
 export type FeatureAvailability = {
+    meilinEnabled: boolean;
     welcomeEnabled: boolean;
     shortDramaEnabled: boolean;
     taskCenterEnabled: boolean;
@@ -47,6 +48,7 @@ export type FeatureAvailability = {
 };
 
 export const defaultFeatureAvailability: FeatureAvailability = {
+    meilinEnabled: false,
     welcomeEnabled: true,
     shortDramaEnabled: true,
     taskCenterEnabled: true,

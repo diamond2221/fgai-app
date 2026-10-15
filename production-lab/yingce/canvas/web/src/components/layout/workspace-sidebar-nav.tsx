@@ -49,6 +49,7 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
                 { id: "fg-stories", title: "故事与项目", icon: BookOpenText, to: "/fg-production" },
                 ...(features.shortDramaEnabled ? [{ ...toolItem("projects", "/projects"), title: "短剧 Agent" }] : []),
                 { ...toolItem("projects", "/advertising"), id: "fg-advertising", title: "广告工作台" },
+                ...(features.meilinEnabled ? [{ ...toolItem("projects", "/meilin"), id: "fg-meilin", title: "美林 · 超级导演" }] : []),
                 { ...toolItem("create", "/creator-app"), id: "fg-creator", title: "超级综合工作台" },
                 { ...toolItem("projects", "/arcreel"), id: "fg-arcreel", title: "超级小说转视频" },
                 { ...toolItem("canvas", "/canvas"), title: "超级自由画布" },
@@ -332,7 +333,7 @@ export function workspaceNavActiveId(pathname: string, section?: string | null) 
     if (segments[0] === "toolbox" && segments[1]) return `toolbox-${segments[1]}`;
     const slug = segments[0] || "home";
     // FG: sixth-module routes map to their sidebar ids.
-    const fgRouteNavIds: Record<string, string> = { "fg-production": "fg-stories", advertising: "fg-advertising", "creator-app": "fg-creator", arcreel: "fg-arcreel", "fg-audio-tools": "fg-audio-settings" };
+    const fgRouteNavIds: Record<string, string> = { "fg-production": "fg-stories", advertising: "fg-advertising", meilin: "fg-meilin", "creator-app": "fg-creator", arcreel: "fg-arcreel", "fg-audio-tools": "fg-audio-settings" };
     return slug === "settings" && section ? `settings:${section}` : fgRouteNavIds[slug] || slug;
 }
 
