@@ -53,6 +53,8 @@ import { useNavigate, useParams } from "react-router";
 
 import { SkillRuntimePicker, useSkillRuntimeCatalog } from "@/components/skills/skill-runtime-picker";
 import { ModelPicker } from "@/components/model-picker";
+import { getShortDramaGPTStatus, shortDramaDefaultTextModel } from "@/services/short-drama-text";
+import { shortDramaMediaDefault } from "@/lib/short-drama-models";
 import { FGPricePreview } from "@/components/fg-price-preview";
 import { createDramaProductionPlan, dramaSegmentDurations, type DramaProductionPlan } from "@/lib/short-drama-production";
 import { WorkspaceState } from "@/components/layout/workspace-state";
@@ -66,6 +68,7 @@ import {
     createProjectUnit,
     deleteProjectUnit,
     importProjectUnits,
+    getProjectUnitWorkspace,
     replaceProjectUnitShots,
     reorderProjectUnits,
     updateProjectUnit,
@@ -78,6 +81,7 @@ import { listGenerationTasks, queryGenerationTask, type GenerationTask } from "@
 import { formatCount, formatTime, statusLabel, type ProjectDetailViewProps } from "./shared";
 import { chapterStoryboardAssets, chapterStoryboardCharacters, chapterStoryboardReplaceImpact, storyboardRowsToProjectShots } from "./chapter-storyboard-production";
 import { chapterAssetsFromGenerationTask, chapterStoryboardFromGenerationTask, chapterTaskIdentity, extractChapterAssets, generateChapterStoryboard } from "./project-chapter-ai";
+import { ChapterBatchModal } from "./chapter-batch-modal";
 
 const CHAPTER_ROW_HEIGHT = 62;
 const MAX_NOVEL_IMPORT_CHAPTERS = 2500;
@@ -109,6 +113,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
     const [dirty, setDirty] = useState(false);
     const [characterExtractOpen, setCharacterExtractOpen] = useState(false);
     const [storyboardOpen, setStoryboardOpen] = useState(false);
+    const [batchOpen, setBatchOpen] = useState(false);
     const [chapterOperations, setChapterOperations] = useState<Record<string, ChapterOperation>>({});
     const [completedChapterOperations, setCompletedChapterOperations] = useState<Record<string, true>>({});
     const [operationNow, setOperationNow] = useState(() => Date.now());
@@ -116,14 +121,16 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
     const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
     const { skills: availableSkills, loading: skillsLoading } = useSkillRuntimeCatalog();
     const effectiveConfig = useEffectiveConfig();
-    const [planningVideoModel, setPlanningVideoModel] = useState(detail.project.defaultVideoModel || effectiveConfig.videoModel);
+    const personalGPT = useQuery({ queryKey: ["short-drama-personal-gpt"], queryFn: getShortDramaGPTStatus, refetchOnWindowFocus: true });
+    const defaultTextModel = shortDramaDefaultTextModel(effectiveConfig, personalGPT.data?.configured === true);
+    const [planningVideoModel, setPlanningVideoModel] = useState(detail.project.defaultVideoModel || shortDramaMediaDefault(effectiveConfig, "video"));
     const [segmentSeconds, setSegmentSeconds] = useState(15);
     const [segmentStrategy, setSegmentStrategy] = useState<DramaProductionPlan["strategy"]>("story");
     const [includeAction, setIncludeAction] = useState(false);
     const [actionDirection, setActionDirection] = useState("");
     const planningDurations = dramaSegmentDurations(effectiveConfig, planningVideoModel);
     const planningSeconds = planningDurations.includes(segmentSeconds) ? segmentSeconds : planningDurations.includes(15) ? 15 : planningDurations[0];
-    useEffect(() => { if (!planningVideoModel) setPlanningVideoModel(detail.project.defaultVideoModel || effectiveConfig.videoModel); }, [planningVideoModel, detail.project.defaultVideoModel, effectiveConfig.videoModel]);
+    useEffect(() => { if (!planningVideoModel) setPlanningVideoModel(detail.project.defaultVideoModel || shortDramaMediaDefault(effectiveConfig, "video")); }, [planningVideoModel, detail.project.defaultVideoModel, effectiveConfig]);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const listRef = useRef<HTMLDivElement>(null);
     const locallyOwnedTaskIdsRef = useRef(new Set<string>());
@@ -386,9 +393,9 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         refreshProject();
         return created.candidates.length;
     };
-    const storeGeneratedStoryboard = async (unitId: string, rows: ReturnType<typeof chapterStoryboardFromGenerationTask>["rows"], productionPlan?: DramaProductionPlan) => {
+    const storeGeneratedStoryboard = async (unitId: string, rows: ReturnType<typeof chapterStoryboardFromGenerationTask>["rows"], productionPlan?: DramaProductionPlan, expectedShotIds?: string[]) => {
         const shots = storyboardRowsToProjectShots(rows, detail, productionPlan);
-        await replaceProjectUnitShots(detail.project.id, unitId, shots, detail.shots.filter((shot) => shot.unitId === unitId).map((shot) => shot.id));
+        await replaceProjectUnitShots(detail.project.id, unitId, shots, expectedShotIds || detail.shots.filter((shot) => shot.unitId === unitId).map((shot) => shot.id));
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ["project", detail.project.id] }),
             queryClient.invalidateQueries({ queryKey: ["projects"] }),
@@ -405,7 +412,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
             setCharacterExtractOpen(false);
             beginChapterOperation(operationUnitId, "characters");
             message.info("角色、场景与道具提取任务已开始，可继续编辑或切换章节");
-            const assets = await extractChapterAssets(input, { onTaskUpdate: (task) => updateChapterOperation(operationUnitId, "characters", task) });
+            const assets = await extractChapterAssets(input, { onTaskUpdate: (task) => updateChapterOperation(operationUnitId, "characters", task), onFallback: text => message.warning(text) });
             const freshCount = await storeExtractedAssets(operationUnitId, assets);
             if (!freshCount) {
                 message.info("没有新增资产：提取为空或资产已存在");
@@ -440,6 +447,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         beginChapterOperation(unit.id, "storyboard");
         message.info("分镜生成任务已开始，可继续编辑或切换章节");
         try {
+            const expectedShotIds = (await getProjectUnitWorkspace(detail.project.id, unit.id)).shots.map(shot => shot.id);
             const result = await generateChapterStoryboard({
                 projectId: detail.project.id,
                 projectName: detail.project.name,
@@ -459,8 +467,8 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                 selectedSkillIds,
                 productionPlan: createDramaProductionPlan(effectiveConfig, planningVideoModel, planningSeconds, segmentStrategy),
                 actionDirection: includeAction ? actionDirection.trim() : undefined,
-            }, { onTaskUpdate: (task) => updateChapterOperation(unit.id, "storyboard", task) });
-            const shotCount = await storeGeneratedStoryboard(unit.id, result.rows, result.productionPlan);
+            }, { onTaskUpdate: (task) => updateChapterOperation(unit.id, "storyboard", task), onFallback: text => message.warning(text) });
+            const shotCount = await storeGeneratedStoryboard(unit.id, result.rows, result.productionPlan, expectedShotIds);
             message.success(`已生成 ${shotCount} 个视频片段，并应用 ${result.skillCount} 个技能`);
             navigate(`/projects/${detail.project.id}/workflow/${unit.id}/storyboard`);
         } catch (error) {
@@ -505,12 +513,23 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
             }
             recoveringTaskIdsRef.current.add(task.id);
             void queryGenerationTask(task.id).then(async (completedTask) => {
+                const workspace = await getProjectUnitWorkspace(detail.project.id, taskChapterId);
+                if (chapterTaskResultAlreadyApplied(completedTask, taskChapterId, kind, workspace)) {
+                    recoveredTaskIdsRef.current.add(task.id);
+                    markChapterOperationCompleted(taskChapterId, kind);
+                    return;
+                }
                 if (kind === "characters") {
                     await storeExtractedAssets(taskChapterId, chapterAssetsFromGenerationTask(completedTask));
                     message.success("已恢复刷新前完成的章节资产提取结果");
                 } else {
+                    // Overview data may omit shots. Never replay a historical replacement over existing work.
+                    if (workspace.shots.length) {
+                        recoveredTaskIdsRef.current.add(task.id);
+                        return;
+                    }
                     const result = chapterStoryboardFromGenerationTask(completedTask);
-                    await storeGeneratedStoryboard(taskChapterId, result.rows, result.productionPlan);
+                    await storeGeneratedStoryboard(taskChapterId, result.rows, result.productionPlan, []);
                     message.success("已恢复刷新前完成的章节分镜");
                 }
                 recoveredTaskIdsRef.current.add(task.id);
@@ -572,10 +591,15 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
 
     return (
         <div className="grid h-full min-h-0 min-w-0 w-full grid-rows-[minmax(180px,34vh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)] lg:grid-rows-1">
+            <ChapterBatchModal detail={detail} open={batchOpen} onClose={() => setBatchOpen(false)} onRefresh={refreshProject} onTask={(id, kind, task) => {
+                updateChapterOperation(id, kind, task);
+                if (["succeeded", "failed", "cancelled"].includes(task.status)) finishChapterOperation(id, kind);
+            }} />
             <aside className="flex min-h-0 min-w-0 w-full flex-col border-b border-border/70 bg-background/28 lg:border-b-0 lg:border-r">
                 <div className="flex h-11 shrink-0 items-center justify-between border-b border-border/70 px-2.5">
                     <div className="text-xs font-medium text-foreground/55">章节 <span className="ml-1 tabular-nums text-foreground/35">{detail.units.length.toLocaleString("zh-CN")}</span></div>
                     <div className="flex items-center gap-0.5">
+                        <Button type="text" size="small" disabled={dirty || detail.project.status === "archived"} onClick={() => setBatchOpen(true)}>批量处理</Button>
                         {selectedId ? <Tooltip title="回到当前章节"><Button type="text" size="small" icon={<Crosshair className="size-3.5" />} aria-label="回到当前章节" onClick={revealSelectedChapter} /></Tooltip> : null}
                         <Tooltip title="导入小说"><Button type="text" size="small" icon={<FileUp className="size-3.5" />} aria-label="导入小说" onClick={() => setImportOpen(true)} /></Tooltip>
                         <Tooltip title="添加章节"><Button type="text" size="small" icon={<Plus className="size-4" />} aria-label="添加章节" onClick={() => setCreateOpen(true)} /></Tooltip>
@@ -631,8 +655,8 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[var(--fs-tiny)] text-foreground/38"><span>{dirty ? "有未保存修改" : `保存于 ${formatTime(selectedUnit.updatedAt)}`}</span><span>·</span><span>{formatCount(wordCount)} 字</span><span>·</span><span>{chapterCanvasCount(selectedUnit.id)} 个画布</span></div>
                             </div>
                             <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                                <Button size="small" icon={<UsersRound className="size-3.5" />} disabled={!selectedUnit || dirty || Boolean(characterOperation)} loading={Boolean(characterOperation)} onClick={() => { setSelectedTextModel(effectiveConfig.textModel || effectiveConfig.model || effectiveConfig.textModels[0] || ""); setCharacterExtractOpen(true); }} aria-label={characterOperation ? `提取角色、场景与道具，已运行 ${formatOperationElapsed(characterOperation.startedAt, operationNow)}` : "提取角色、场景与道具"}>{characterOperation ? `提取资产（已运行${formatOperationElapsed(characterOperation.startedAt, operationNow)}）` : charactersGenerated ? "提取资产（已生成）" : "提取角色、场景与道具"}</Button>
-                                <Button size="small" type="primary" icon={<Clapperboard className="size-3.5" />} disabled={!selectedUnit || dirty || Boolean(storyboardOperation)} loading={Boolean(storyboardOperation)} onClick={() => { setSelectedTextModel(effectiveConfig.textModel || effectiveConfig.model || effectiveConfig.textModels[0] || ""); setSelectedSkillIds([]); setIncludeAction(/打斗|打戏|搏斗|交锋|挥拳|拳击|决斗|斗法|剑气|fight(?:ing)?|combat|duel/i.test(editor?.getText() || stripHtml(selectedUnit?.sourceText || ""))); setActionDirection(""); setStoryboardOpen(true); }} aria-label={storyboardOperation ? `生成到分镜制作，已运行 ${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}` : "生成到分镜制作"}>{storyboardOperation ? `生成到分镜制作（已运行${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}）` : storyboardGenerated ? "生成到分镜制作（已生成）" : "生成到分镜制作"}</Button>
+                                <Button size="small" icon={<UsersRound className="size-3.5" />} disabled={!selectedUnit || dirty || Boolean(characterOperation) || personalGPT.isPending} loading={Boolean(characterOperation)} onClick={() => { setSelectedTextModel(defaultTextModel); setCharacterExtractOpen(true); }} aria-label={characterOperation ? `提取角色、场景与道具，已运行 ${formatOperationElapsed(characterOperation.startedAt, operationNow)}` : "提取角色、场景与道具"}>{characterOperation ? `提取资产（已运行${formatOperationElapsed(characterOperation.startedAt, operationNow)}）` : charactersGenerated ? "提取资产（已生成）" : "提取角色、场景与道具"}</Button>
+                                <Button size="small" type="primary" icon={<Clapperboard className="size-3.5" />} disabled={!selectedUnit || dirty || Boolean(storyboardOperation) || personalGPT.isPending} loading={Boolean(storyboardOperation)} onClick={() => { setSelectedTextModel(defaultTextModel); setSelectedSkillIds([]); setIncludeAction(/打斗|打戏|搏斗|交锋|挥拳|拳击|决斗|斗法|剑气|fight(?:ing)?|combat|duel/i.test(editor?.getText() || stripHtml(selectedUnit?.sourceText || ""))); setActionDirection(""); setStoryboardOpen(true); }} aria-label={storyboardOperation ? `生成到分镜制作，已运行 ${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}` : "生成到分镜制作"}>{storyboardOperation ? `生成到分镜制作（已运行${formatOperationElapsed(storyboardOperation.startedAt, operationNow)}）` : storyboardGenerated ? "生成到分镜制作（已生成）" : "生成到分镜制作"}</Button>
                                 <Button size="small" type={dirty ? "primary" : "default"} icon={dirty ? <Save className="size-3.5" /> : <Check className="size-3.5" />} disabled={!selectedUnit || !dirty || !draftTitle.trim() || saveMutation.isPending} loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>{dirty ? "保存" : "已保存"}</Button>
                             </div>
                         </header>
@@ -716,11 +740,11 @@ function chapterOperationFromTask(task: GenerationTask): ChapterOperation {
     return { startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(), taskId: task.id };
 }
 
-function chapterTaskResultAlreadyApplied(task: GenerationTask, chapterId: string, kind: ChapterOperationKind, detail: ProjectDetail) {
+function chapterTaskResultAlreadyApplied(task: GenerationTask, chapterId: string, kind: ChapterOperationKind, detail: Pick<ProjectDetail, "assetCandidates" | "shots">) {
     const completedAt = Date.parse(task.completedAt || task.updatedAt);
     if (!Number.isFinite(completedAt)) return false;
     const updatedAt = kind === "characters"
-        ? detail.assetCandidates.filter((candidate) => candidate.unitId === chapterId && candidate.category === "character").map((candidate) => Date.parse(candidate.updatedAt))
+        ? detail.assetCandidates.filter((candidate) => candidate.unitId === chapterId).map((candidate) => Date.parse(candidate.updatedAt))
         : detail.shots.filter((shot) => shot.unitId === chapterId).map((shot) => Date.parse(shot.updatedAt));
     return updatedAt.some((timestamp) => Number.isFinite(timestamp) && timestamp >= completedAt);
 }

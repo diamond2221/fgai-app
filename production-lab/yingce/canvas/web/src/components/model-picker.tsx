@@ -3,6 +3,7 @@ import { Check, ChevronDown, Coins } from "lucide-react";
 import { Popover } from "antd";
 
 import { imageQualityLabel } from "@/lib/image-quality";
+import { refreshSystemChannels } from "@/lib/user-session";
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { modelCapabilityConfigFor, videoDurationOptions } from "@/lib/model-capabilities";
 import { formatPriceRange, modelQuoteDescription, modelQuoteRequest, normalizeTierResolution, priceTierSummaryLabel, priceTiersForCurrentSelection } from "@/lib/model-pricing";
@@ -58,6 +59,9 @@ export function ModelPicker({
     const rawTheme = useActiveTheme();
     const theme = (canvasThemes[rawTheme as keyof typeof canvasThemes] ?? canvasThemes.dark) as CanvasTheme;
     const [open, setOpen] = useState(false);
+    useEffect(() => {
+        if (open) void refreshSystemChannels(30_000).catch(() => { /* Keep the last verified catalog when temporarily offline. */ });
+    }, [open]);
     const [availableHeight, setAvailableHeight] = useState(0);
     const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -272,6 +276,7 @@ export function ModelPicker({
         <div className={cn(fullWidth ? "w-full min-w-0" : "w-fit max-w-full")} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <Popover
                 open={open}
+                getPopupContainer={trigger => trigger.closest<HTMLElement>(".ant-modal-root") || document.body}
                 onOpenChange={setPickerOpen}
                 trigger="click"
                 placement="bottomLeft"

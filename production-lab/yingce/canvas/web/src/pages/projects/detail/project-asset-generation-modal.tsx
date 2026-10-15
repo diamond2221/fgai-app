@@ -4,6 +4,7 @@ import { AppModal } from "@/components/ui/product/app-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { FGPricePreview } from "@/components/fg-price-preview";
+import { shortDramaMediaDefault } from "@/lib/short-drama-models";
 import { FGSkillControl } from "@/components/fg-skill-control";
 import { composeFGImageStylePrompt, fgImageStyles } from "@/services/fg-image-styles";
 import { fgSkillCatalog } from "@/services/fg-skill-catalog";
@@ -32,7 +33,10 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
     const { message } = App.useApp();
     const effectiveConfig = useEffectiveConfig();
     const theme = canvasThemes[useActiveTheme()];
-    const [config, setConfig] = useState(() => characterTurnaroundConfig(effectiveConfig));
+    const [config, setConfig] = useState(() => {
+        const model = detail.project.defaultImageModel || shortDramaMediaDefault(effectiveConfig, "image");
+        return characterTurnaroundConfig({ ...effectiveConfig, model, imageModel: model });
+    });
     const [rows, setRows] = useState<Row[]>([]);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);

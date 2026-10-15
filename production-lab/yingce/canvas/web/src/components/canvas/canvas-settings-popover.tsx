@@ -31,7 +31,7 @@ export function CanvasSettingsPopover({ label, summary, children, placement = "t
             onOpenChange={change}
             trigger="click"
             placement={placement}
-            getPopupContainer={getPopupContainer}
+            getPopupContainer={getPopupContainer || (trigger => trigger.closest<HTMLElement>(".ant-modal-root") || document.body)}
             autoAdjustOverflow={autoAdjustOverflow}
             arrow={false}
             destroyOnHidden

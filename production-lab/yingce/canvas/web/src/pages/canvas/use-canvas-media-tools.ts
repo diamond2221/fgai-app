@@ -384,7 +384,7 @@ export function useCanvasMediaTools({
     const runExtractVideoAudio = useCallback(async (node: CanvasNodeData, params: CanvasVideoSegmentParams) => {
         const progress = startUploadStatus("提取音频", "加载 FFmpeg", 4);
         try {
-            const mp3 = await extractVideoAudio({ url: node.metadata?.content, storageKey: node.metadata?.storageKey }, { startMs: params.startMs, endMs: params.endMs }, node.metadata?.durationMs, (status) => {
+            const mp3 = await extractVideoAudio({ url: node.metadata?.content, storageKey: node.metadata?.storageKey }, { startMs: params.startMs, endMs: params.endMs }, params.sourceDurationMs ?? node.metadata?.durationMs, (status) => {
                 progress.update(status.phase === "loading" ? "加载 FFmpeg" : status.phase === "reading" ? "读取视频资源" : "正在提取音频", status.phase === "encoding" ? 3 : 2);
             });
             progress.update("上传音频到服务器", 4);
@@ -449,7 +449,8 @@ export function useCanvasMediaTools({
                         : segment.sourceStorageKey || segment.sourceUrl
                             ? { url: segment.sourceUrl, storageKey: segment.sourceStorageKey }
                             : { url: node.metadata?.content, storageKey: node.metadata?.storageKey };
-                    const trimDurationMs = sourceNode?.metadata?.durationMs || node.metadata?.durationMs;
+                    const usesDialogSource = sourceNode ? sourceNode.id === node.id : !segment.sourceStorageKey && !segment.sourceUrl;
+                    const trimDurationMs = usesDialogSource && params.sourceDurationMs ? params.sourceDurationMs : sourceNode?.metadata?.durationMs || node.metadata?.durationMs;
                     progress.update(`加载 FFmpeg（${index + 1}/${segments.length}）`, index * 4 + 1);
                     const mp4 = await trimVideoSegment(trimSource, { startMs: segment.startMs, endMs: segment.endMs }, trimDurationMs, (status) => {
                         progress.update(status.phase === "loading" ? `加载 FFmpeg（${index + 1}/${segments.length}）` : status.phase === "reading" ? `读取视频资源（${index + 1}/${segments.length}）` : `正在截取片段（${index + 1}/${segments.length}）`, status.phase === "encoding" ? index * 4 + 3 : index * 4 + 2);

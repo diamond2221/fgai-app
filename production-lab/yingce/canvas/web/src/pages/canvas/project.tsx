@@ -1210,6 +1210,8 @@ function CanvasViewportPage() {
         containerRef,
         nodesRef,
         viewportRef,
+        previewViewport,
+        commitViewport: handleViewportChange,
         selectedNodeIdsRef,
         historyPausedRef,
         screenToCanvas,

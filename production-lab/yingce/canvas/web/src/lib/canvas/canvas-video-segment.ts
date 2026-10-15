@@ -23,6 +23,7 @@ const INPUT_NAME = SEGMENT_INPUT_NAME;
 const OUTPUT_NAME = SEGMENT_OUTPUT_NAME;
 
 function assertValidRange(range: VideoSegmentRange, durationMs?: number) {
+    if (!Number.isFinite(range.startMs) || !Number.isFinite(range.endMs)) throw new Error("片段时间无效，请重新选择起止时间");
     const startMs = Math.max(0, Math.round(range.startMs));
     const endMs = Math.round(range.endMs);
     if (endMs <= startMs) throw new Error("片段结束时间必须晚于开始时间");

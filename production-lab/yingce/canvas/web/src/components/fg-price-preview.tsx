@@ -10,13 +10,16 @@ export function fgQuotePriceLabel(quote: Pick<Quote,'estimatedCny'|'estimateKind
  const rates=quote.lines.filter(line=>/百万\s*Tokens?/i.test(line)).flatMap(line=>[...line.matchAll(/¥([\d,.]+)/g)].map(m=>Number(m[1].replaceAll(',','')))).filter(Number.isFinite);
  return (mode==='text'||mode==='image')&&rates.length?`¥${Math.min(...rates).toLocaleString('zh-CN',{maximumFractionDigits:4})}–${Math.max(...rates).toLocaleString('zh-CN',{maximumFractionDigits:4})}/百万Token`:'按用量';
 }
-export function FGPricePreview({config,model,mode,requirements,onQuote}:{config:AiConfig;model:string;mode?:ModelCapability;requirements?:ModelRequirements;onQuote?:(quote?:Quote)=>void}){
+export function fgModelQuoteRequest(config:AiConfig,model:string,mode?:ModelCapability,requirements?:ModelRequirements){
  const channel=resolveModelChannel(config,model),input=requirements?.input;
  const enabled=channel.scope==='system'&&['text','image','video'].includes(mode||'');
- const payload=enabled?{channelId:channel.id,modelKey:modelOptionName(model),referenceVideoSeconds:requirements?.referenceVideoSeconds,intent:{capability:mode,
+ return enabled?{channelId:channel.id,modelKey:modelOptionName(model),referenceVideoSeconds:requirements?.referenceVideoSeconds,intent:{capability:mode,
   operation:mode==='video'&&input?resolveVideoOperationForModel(config,model,input,requirements?.videoOperation):mode==='image'?(input?.imageCount?'image_to_image':'text_to_image'):undefined,
   inputs:{image:(input?.imageCount||0)+(input?.characterCount||0),video:input?.videoCount||0,audio:input?.audioCount||0},
   options:{...modelRequestOptions(config,mode!),...requirements?.options,...(requirements?.imageSize?{size:requirements.imageSize}:{}),...(requirements?.videoSeconds?{videoSeconds:Number(requirements.videoSeconds)}:{})}}}:null;
+}
+export function FGPricePreview({config,model,mode,requirements,onQuote}:{config:AiConfig;model:string;mode?:ModelCapability;requirements?:ModelRequirements;onQuote?:(quote?:Quote)=>void}){
+ const payload=fgModelQuoteRequest(config,model,mode,requirements),enabled=Boolean(payload);
  const key=JSON.stringify(payload),[state,setState]=useState<{key:string;quote?:Quote;error?:string}>({key:''});
  useEffect(()=>{
   if(key==='null')return;

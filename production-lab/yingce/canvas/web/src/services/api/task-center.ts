@@ -395,7 +395,7 @@ export async function waitForGenerationTask(id: string, options?: WaitForGenerat
             }
             if (task.status === "failed" || task.status === "cancelled") {
                 window.dispatchEvent(new CustomEvent("wallet:updated"));
-                throw new Error(task.error ? generationErrorMessage(task.error) : `任务${task.status === "cancelled" ? "已取消" : "失败"}`);
+                throw new GenerationTaskFailure(task);
             }
             await delay(intervalMs, options?.signal);
         }
@@ -492,7 +492,7 @@ async function waitForGenerationTaskTextEvents(id: string, options: WaitForGener
                 window.dispatchEvent(new CustomEvent("wallet:updated"));
                 if (completed.status === "succeeded") return completed;
                 if (completed.status === "failed" || completed.status === "cancelled") {
-                    throw new TaskTextStreamFatalError(completed.error ? generationErrorMessage(completed.error) : `任务${completed.status === "cancelled" ? "已取消" : "失败"}`);
+                    throw new GenerationTaskFailure(completed);
                 }
             }
             lastStreamError = new Error("任务文本流连接提前结束");
@@ -522,6 +522,13 @@ class TaskTextStreamFatalError extends Error {
     constructor(message: string) {
         super(message);
         this.name = "TaskTextStreamFatalError";
+    }
+}
+
+export class GenerationTaskFailure extends TaskTextStreamFatalError {
+    constructor(readonly task: GenerationTask) {
+        super(task.error ? generationErrorMessage(task.error) : `任务${task.status === "cancelled" ? "已取消" : "失败"}`);
+        this.name = "GenerationTaskFailure";
     }
 }
 

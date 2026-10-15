@@ -159,8 +159,20 @@ function safeScopedStorageGet(key: string) {
     }
 }
 
-export async function refreshSystemChannels() {
+let catalogRefresh: { userId: string; at: number; pending: Promise<void> } | undefined;
+
+export function refreshSystemChannels(minimumAgeMs = 0) {
+    const userId = useUserStore.getState().user?.id || "";
+    if (catalogRefresh?.userId === userId && Date.now() - catalogRefresh.at < minimumAgeMs) return catalogRefresh.pending;
+    const pending = loadSystemChannels(userId);
+    catalogRefresh = { userId, at: Date.now(), pending };
+    void pending.catch(() => { if (catalogRefresh?.pending === pending) catalogRefresh = undefined; });
+    return pending;
+}
+
+async function loadSystemChannels(userId: string) {
     const catalog = await getModelCatalog();
+    if ((useUserStore.getState().user?.id || "") !== userId) return;
     useConfigStore.getState().mergeSystemChannels(modelCatalogChannels(catalog));
 }
 

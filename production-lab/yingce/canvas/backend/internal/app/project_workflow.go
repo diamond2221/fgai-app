@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -330,7 +331,44 @@ func (s *Service) RegisterTaskOutput(userID string, projectID string, stepID str
 	if err := s.repo.RegisterWorkflowTaskOutput(step, next, instance, projectID, link, representation, productionLink, artifact); err != nil {
 		return model.WorkflowStepInstance{}, err
 	}
+	if artifact != nil && artifact.Version > 0 && req.AssetVersionID == workflowGeneratedEntityID("version", task.ID) {
+		asset, err := s.repo.AssetForUser(task.UserID, workflowGeneratedEntityID("asset", task.ID))
+		if err != nil {
+			return model.WorkflowStepInstance{}, err
+		}
+		asset.Title = fmt.Sprintf("镜头%02d-%s-v%d", shot.Position+1, workflowArtifactLabel(artifact.Type), artifact.Version)
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(asset.PayloadJSON), &payload); err != nil {
+			return model.WorkflowStepInstance{}, err
+		}
+		payload["title"] = asset.Title
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return model.WorkflowStepInstance{}, err
+		}
+		asset.PayloadJSON = string(encoded)
+		if err := s.repo.UpsertAsset(asset); err != nil {
+			return model.WorkflowStepInstance{}, err
+		}
+	}
 	return *step, nil
+}
+
+func workflowArtifactLabel(artifactType string) string {
+	switch artifactType {
+	case "storyboard":
+		return "分镜图"
+	case "action_board":
+		return "动作预演"
+	case "video":
+		return "镜头视频"
+	case "start_frame":
+		return "首帧"
+	case "end_frame":
+		return "尾帧"
+	default:
+		return "产物"
+	}
 }
 
 func (s *Service) validateWorkflowStepCompletion(projectID string, instance *model.WorkflowInstance, step *model.WorkflowStepInstance) error {
