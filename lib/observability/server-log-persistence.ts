@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { sanitiseLogText } from './server-log';
 
 type ServerLogLevel = 'info' | 'warn' | 'error';
 type LogSource = 'audit' | 'frontend' | 'app' | 'provider' | 'infra' | 'deploy' | 'billing' | 'data';
@@ -42,13 +43,13 @@ let logPersistenceDisabledUntil = 0;
 logPersistencePool.on('error', () => undefined);
 
 function redact(value: unknown, maxLength: number) {
-  return String(value ?? '')
+  return sanitiseLogText(String(value ?? '')
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, '[redacted]')
     .replace(/((?:token|signature|sig|key|secret|password)=)[^&\s]+/gi, '$1[redacted]')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, maxLength);
+    .slice(0, maxLength));
 }
 
 function logField(payload: Record<string, unknown>, path: string[]) {
@@ -88,7 +89,20 @@ function persistedLogSource(eventName: string, payload: Record<string, unknown>)
   return 'app';
 }
 
+function sanitiseLogPayload(value: unknown): unknown {
+  if (typeof value === 'string') return sanitiseLogText(value);
+  if (Array.isArray(value)) return value.map(sanitiseLogPayload);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    sanitiseLogText(key), sanitiseLogPayload(item),
+  ]));
+}
+
 function buildPersistedServerLog(eventName: string, payload: Record<string, unknown>, level: ServerLogLevel): PersistedServerLog {
+  // Sanitize the complete JSON snapshot, including keys and strings cut through surrogate pairs.
+  // 完整清洗 JSON 快照的键和值，覆盖上游截断后产生的孤立代理项，避免毒记录阻塞整批。
+  payload = sanitiseLogPayload(JSON.parse(JSON.stringify(payload))) as Record<string, unknown>;
+  eventName = sanitiseLogText(eventName);
   const message = logFieldText(payload, [['message'], ['error', 'message'], ['reason'], ['stage'], ['outcome']], 1_000) || eventName;
   const service = logFieldText(payload, [['service'], ['feature'], ['provider']], 120) || eventName;
   const occurredAtValue = logFieldText(payload, [['timestampUtc']], 80);
@@ -126,43 +140,73 @@ function reportLogPersistenceFailure(error: unknown, batchSize: number) {
   }
 }
 
+async function insertServerLogs(batch: PersistedServerLog[]) {
+  const columns = [
+    'occurred_at', 'event_id', 'source', 'service', 'event_name', 'level', 'outcome',
+    'message', 'trace_id', 'request_id', 'task_id', 'user_id', 'route', 'http_status',
+    'duration_ms', 'payload', 'search_text',
+  ];
+  const values = batch.flatMap((item) => [
+    item.occurredAt,
+    item.eventId,
+    item.source,
+    item.service,
+    item.eventName,
+    item.level,
+    item.outcome,
+    item.message,
+    item.traceId,
+    item.requestId,
+    item.taskId,
+    item.userId,
+    item.route,
+    item.httpStatus,
+    item.durationMs,
+    JSON.stringify(item.payload),
+    item.searchText,
+  ]);
+  const tuples = batch.map((_, rowIndex) => `(${columns.map((_, columnIndex) => {
+    const parameter = rowIndex * columns.length + columnIndex + 1;
+    return columnIndex === 15 ? `$${parameter}::jsonb` : `$${parameter}`;
+  }).join(', ')})`).join(', ');
+  await logPersistencePool.query(
+    `insert into observability_log_events (${columns.join(', ')}) values ${tuples}`,
+    values,
+  );
+}
+
+function isLogDataError(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false;
+  return typeof error.code === 'string' && /^(22|23)/.test(error.code);
+}
+
+async function persistServerLogBatch(batch: PersistedServerLog[]) {
+  try {
+    await insertServerLogs(batch);
+    return;
+  } catch (error) {
+    if (!isLogDataError(error)) throw error;
+  }
+  // Isolate permanent row errors; connectivity failures still retry the remaining records together.
+  // 永久数据错误逐条隔离；连接故障继续保留未处理记录，避免一条坏日志拖住后续日志。
+  while (batch.length) {
+    try {
+      await insertServerLogs([batch[0]]);
+    } catch (error) {
+      if (!isLogDataError(error)) throw error;
+      reportLogPersistenceFailure(error, 1);
+      droppedServerLogs += 1;
+    }
+    batch.shift();
+  }
+}
+
 async function flushServerLogQueue() {
   if (logFlushRunning || !pendingServerLogs.length) return;
   logFlushRunning = true;
   const batch = pendingServerLogs.splice(0, LOG_PERSISTENCE_BATCH_SIZE);
   try {
-    const columns = [
-      'occurred_at', 'event_id', 'source', 'service', 'event_name', 'level', 'outcome',
-      'message', 'trace_id', 'request_id', 'task_id', 'user_id', 'route', 'http_status',
-      'duration_ms', 'payload', 'search_text',
-    ];
-    const values = batch.flatMap((item) => [
-      item.occurredAt,
-      item.eventId,
-      item.source,
-      item.service,
-      item.eventName,
-      item.level,
-      item.outcome,
-      item.message,
-      item.traceId,
-      item.requestId,
-      item.taskId,
-      item.userId,
-      item.route,
-      item.httpStatus,
-      item.durationMs,
-      JSON.stringify(item.payload),
-      item.searchText,
-    ]);
-    const tuples = batch.map((_, rowIndex) => `(${columns.map((_, columnIndex) => {
-      const parameter = rowIndex * columns.length + columnIndex + 1;
-      return columnIndex === 15 ? `$${parameter}::jsonb` : `$${parameter}`;
-    }).join(', ')})`).join(', ');
-    await logPersistencePool.query(
-      `insert into observability_log_events (${columns.join(', ')}) values ${tuples}`,
-      values,
-    );
+    await persistServerLogBatch(batch);
   } catch (error) {
     // Requeue the failed atomic batch so a transient database outage does not erase it.
     // 失败批次重新排队，避免数据库短暂故障直接抹掉本批日志；请求仍不等待重试。

@@ -75,7 +75,7 @@ export function safeProviderHeaders(headers: HeadersInit | undefined) {
   return safe;
 }
 
-function sanitiseLogText(value: string) {
+export function sanitiseLogText(value: string) {
   let result = '';
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
