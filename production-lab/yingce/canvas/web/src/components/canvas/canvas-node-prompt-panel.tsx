@@ -525,6 +525,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                         <CanvasVideoSettingsPopover
                             config={config}
                             referenceOperation={resolvedRequirements.videoOperation}
+                            placement={expanded ? "topRight" : "topLeft"}
                             buttonClassName="canvas-node-composer-settings-trigger [&>span]:min-w-0 [&_.lucide]:!size-3"
                             onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
                         />

@@ -35,7 +35,8 @@ export function CanvasSettingsPopover({ label, summary, children, placement = "t
             autoAdjustOverflow={autoAdjustOverflow}
             arrow={false}
             destroyOnHidden
-            styles={{ root: { zIndex: "var(--z-dialog-popover)" }, container: { background: theme.canvas.background, color: theme.node.text, padding: 12 } }}
+            // AntD inherits nested Modal/Popover levels; a fixed 1100 can fall below the expanded editor.
+            styles={{ container: { background: theme.canvas.background, color: theme.node.text, padding: 12 } }}
             content={
                 <section
                     id={id}
