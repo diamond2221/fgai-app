@@ -69,7 +69,7 @@ services:
       - fg
 
   nginx:
-    image: nginx:stable-alpine
+    image: docker.m.daocloud.io/library/nginx:stable-alpine
     profiles:
       - https
     restart: unless-stopped
@@ -108,7 +108,7 @@ services:
       - fg
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: docker.m.daocloud.io/cloudflare/cloudflared:latest
     restart: unless-stopped
     # Force HTTP/2 when outbound UDP/7844 is unavailable on the server network.
     # 服务器网络无法稳定使用 UDP/7844 时固定走 HTTP/2，避免自动切回 QUIC。

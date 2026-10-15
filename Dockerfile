@@ -1,4 +1,4 @@
-FROM node:20-alpine AS base
+FROM docker.m.daocloud.io/library/node:20-alpine AS base
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
@@ -14,7 +14,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm run build
 
-FROM node:20-alpine AS runner
+FROM docker.m.daocloud.io/library/node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
