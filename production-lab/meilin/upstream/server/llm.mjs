@@ -4,14 +4,16 @@ import {createHash,randomUUID} from 'node:crypto';
 
 export const liveText = integrated;
 
-export async function chat({ model, system, messages, maxTokens = 8000, temperature = 0.7, timeoutMs = 180000 }) {
+export async function chat({ model, system, messages, maxTokens = 8000, temperature = 0.7, timeoutMs = 180000, streamPresentation = 'status' }) {
   if(!integrated)throw Error('模拟模式不调用付费模型');
   const c=context();c.textOrdinal=(c.textOrdinal||0)+1;
   const hash=createHash('sha256').update(`${c.operationId}:${c.textOrdinal}`).digest('hex');
   const operationId=c.operationId?`${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-a${hash.slice(17,20)}-${hash.slice(20,32)}`:randomUUID();
   const submitted=await bridge('submit',{operationId,kind:'text',model,payload:{messages:[{role:'system',content:system},...messages],max_tokens:maxTokens,temperature},metadata:{episodeId:c.episodeId||null,sourceAction:c.action||'turn',skills:c.skillsUsed||{}}});
   const until=Date.now()+timeoutMs;
-  while(Date.now()<until){const task=await bridge('task',{taskId:submitted.taskId});
+  let after=0,text='';c.emit?.('status',{text:'模型正在思考，收到正文后会实时显示。'});
+  while(Date.now()<until){const task=await bridge('task',{taskId:submitted.taskId,...(c.emit?{after}:{})});
+    for(const delta of task.replay?.deltas||[]){if(delta.sequence>after){after=delta.sequence;text+=delta.content;if(streamPresentation!=='status')c.emit?.('text',{text,format:streamPresentation,action:c.action});}}
     if(task.status==='succeeded')return task.result.text||'';
     if(['failed','cancelled'].includes(task.status))throw Error(task.error||'文本任务失败');
     await new Promise(r=>setTimeout(r,1000));

@@ -12,8 +12,9 @@ export const SKILLS_DIR = process.env.MEILIN_SKILLS_DIR || join(homedir(), '.cla
 
 // stage: script | style | asset | segment | action | boost
 const CATALOG = [
-  { id: 'fg-overseas-drama-script', stage: 'script', local: true, label: 'FG 海外剧本包', note: 'AI Studio 指引 + 剧本合同 + 四条可复制 Prompt', default: true },
-  { id: 'short-drama-factory', stage: 'script', label: '爆款短剧工厂', note: '钩子库、反转矩阵、断章公式、时长换算' },
+  { id: 'fg-overseas-drama-script', stage: 'script', local: true, label: 'FG 海外剧本包', note: 'AI Studio 指引 + 剧本合同 + 四条可复制 Prompt' },
+  { id: 'short-drama-factory', stage: 'script', label: '爆款短剧工厂', note: '钩子库、反转矩阵、断章公式、时长换算', default: true,
+    parts:{episode:['references/golden-3s-hook-library.md','references/cliffhanger-master-formulas.md','references/dialogue-doctor-anti-ai.md','references/craft-quality-layer.md','references/inner-monologue-vo.md','references/conflict-modes.md']} },
   { id: 'screenwriter', stage: 'script', label: 'Screenwriter', note: '分集大纲、节拍表、改稿' },
 
   { id: 'zy-cinematic-realism', stage: 'style', label: 'ZY 造梦师 · Dream Decode', note: '解析参考图的媒介、光线与质感并迁移为画风规范', license: 'CC BY-NC 4.0', default: true,

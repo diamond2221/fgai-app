@@ -80,7 +80,7 @@ export default function ScriptCard() {
       wide
       kicker={`第 ${n} 集`}
       title="剧本"
-      sub="三条路任选：按指引去 Google AI Studio 用 Gemini 写、让美林直接写、或上传你们自己的剧本。并排比，选好的那版。"
+      sub="默认由爆款短剧工厂写作；也可以粘贴或上传已有剧本。AI Studio 作为可选来源。"
       footer={e.chosen ? (
         <>
           <Locked>第 {n} 集采用{{ sonnet: '美林直写', aistudio: ' AI Studio ', upload: '上传' }[e.chosen]}版</Locked>
@@ -89,7 +89,7 @@ export default function ScriptCard() {
       ) : undefined}
     >
       <div className="lane-tabs seg-tabs" role="tablist" aria-label="剧本来源">
-        {([['aistudio', 'AI Studio'], ['sonnet', '美林直写'], ['upload', '上传']] as [Lane, string][]).map(([id, name]) => (
+        {([['sonnet', '美林写剧本'], ['upload', '已有剧本'], ['aistudio', 'AI Studio（可选）']] as [Lane, string][]).map(([id, name]) => (
           <button key={id} role="tab" aria-selected={mobileLane === id} className={mobileLane === id ? 'on' : ''} onClick={() => setMobileLane(id)}>{name}{e.scripts[id] ? ' ·' : ''}</button>
         ))}
       </div>
@@ -165,7 +165,7 @@ export default function ScriptCard() {
               </div>
             </>
           ) : (
-            <Drop accept=".docx,.txt,.md,.srt,.fountain" text="把编剧给的剧本拖进来；Word 也可以" onFiles={(f) => upload(f[0], { purpose: 'script' })} />
+            <><label>粘贴剧本<textarea className="field" rows={10} value={paste} onChange={ev=>setPaste(ev.target.value)} placeholder="直接粘贴本集原稿"/></label><button className="btn" disabled={busy||!paste.trim()} onClick={async()=>{if(await run('script.upload',{text:paste,name:'粘贴剧本'}))setPaste('');}}>保存原稿</button><Drop accept=".docx,.txt,.md,.srt,.fountain" text="或上传编剧给的文件；支持 Word" onFiles={(f) => upload(f[0], { purpose: 'script' })} /></>
           )}
         </section>
       </div>

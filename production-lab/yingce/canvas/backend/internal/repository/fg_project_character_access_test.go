@@ -19,7 +19,7 @@ func TestFGProjectCharacterAccessFollowsProjectScope(t *testing.T) {
 	sqlDB, _ := db.DB()
 	defer sqlDB.Close()
 	sqlDB.SetMaxOpenConns(1)
-	if err = db.AutoMigrate(&model.Project{}, &model.Asset{}, &model.ProjectAssetLink{}, &model.AssetVersion{}, &model.AssetRepresentation{}, &model.Resource{}, &model.Shot{}, &model.ShotAssetReference{}); err != nil {
+	if err = db.AutoMigrate(&model.Project{}, &model.Asset{}, &model.ProjectAssetLink{}, &model.AssetVersion{}, &model.AssetRepresentation{}, &model.Resource{}, &model.Shot{}, &model.ShotAssetReference{}, &model.ShotArtifact{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, query := range []string{
@@ -112,6 +112,25 @@ func TestFGProjectCharacterAccessFollowsProjectScope(t *testing.T) {
 			if project == "private" && !errors.Is(err, gorm.ErrRecordNotFound) {
 				t.Fatalf("private character image leaked: %v", err)
 			}
+			if _, err = repo.ResourceForUser("alice", resource.ID); err != nil {
+				t.Fatalf("project owner cannot continue administrator's work: %v", err)
+			}
+		}
+	})
+	t.Run("administrator video is visible to project owner only", func(t *testing.T) {
+		res := model.Resource{ID: "admin-result", UserID: "admin", Kind: "video", Status: model.ResourceStatusReady}
+		if err := db.Create(&res).Error; err != nil {
+			t.Fatal(err)
+		}
+		artifact := model.ShotArtifact{ID: "admin-take", ProjectID: "private", ShotID: "private-shot", ResourceID: res.ID}
+		if err := db.Create(&artifact).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.ResourceForUser("alice", res.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.ResourceForUser("bob", res.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatal("unrelated member accessed private result", err)
 		}
 	})
 }

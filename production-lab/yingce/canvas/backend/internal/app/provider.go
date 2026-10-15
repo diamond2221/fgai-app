@@ -187,7 +187,7 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 	}
 	if input.Mode == "text" && strings.HasPrefix(taskType, "canvas_text") && input.StreamText {
 		textPublisher = newTaskTextStreamPublisher(s, userID, taskExecutionID(ctx))
-		if input.AgentRequests != nil {
+		if input.AgentRequests != nil && metadataString(input.Metadata, "source") != "fg-meilin" {
 			textPublisher = newCloudAgentStreamPublisher(s, userID, taskExecutionID(ctx), "assistant_delta")
 			reasoningPublisher := newCloudAgentStreamPublisher(s, userID, taskExecutionID(ctx), "reasoning_delta")
 			input.OnReasoningDelta = reasoningPublisher.Publish

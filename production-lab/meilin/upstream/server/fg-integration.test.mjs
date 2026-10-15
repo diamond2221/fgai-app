@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
 process.env.MEILIN_MODE='fg';process.env.MEILIN_NO_LISTEN='1';process.env.MEILIN_INTERNAL_SECRET='test-only-local-identity-secret';
+const {chat}=await import('./llm.mjs');
 const temp=await mkdtemp(join(tmpdir(),'meilin-fg-test-'));process.env.MEILIN_FILES_DIR=temp;process.env.MEILIN_SKILLS_DIR=join(temp,'skills');
 const {capabilities}=await import('./fg/fg-model-capabilities.mjs');
 const {runContext}=await import('./fg-context.mjs');
@@ -23,13 +24,13 @@ const models=[{id:'claude-sonnet-5-5-t3a',label:'Text',capability:'text',default
 const memory=new PGlite();await memory.exec('CREATE TABLE users(id varchar(36) PRIMARY KEY);');await memory.query('INSERT INTO users VALUES($1),($2)',[actor.id,other.id]);
 const pool={query:async(sql,values)=>{if(!values&&sql.includes(';')){await memory.exec(sql);return {rows:[],rowCount:0};}const r=await memory.query(sql,values);return {...r,rowCount:r.affectedRows??r.rows.length};},connect:async()=>({...pool,release(){}})};
 await store.initialize(pool);
-let submissions=0,polls=0,unavailable=false;
+let submissions=0,polls=0,unavailable=false,streamingText=false,streamPoll=0;
 const tasks=new Map();
 const upstream=createServer(async(req,res)=>{const chunks=[];for await(const c of req)chunks.push(c);const input=JSON.parse(Buffer.concat(chunks).toString()||'{}'),action=req.url.split('/').at(-1);contract.readIdentity(req.headers,req.method,req.url,process.env.MEILIN_INTERNAL_SECRET);
  let data;if(action==='catalog')data={models,budget:{monthlyCny:10,usedCny:0,remainingCny:10,unknown:0}};
  if(action==='quote')data={estimatedCny:.2,lines:['¥0.2'],notes:['待核销'],budget:{monthlyCny:10,remainingCny:10}};
  if(action==='submit'){if(unavailable){res.writeHead(503,{'content-type':'application/json'});res.end(JSON.stringify({error:'等待恢复'}));return;}let task=tasks.get(input.operationId);if(!task){submissions++;task={taskId:randomUUID(),status:'running'};tasks.set(input.operationId,task);}data=task;}
- if(action==='task'){polls++;data={taskId:input.taskId,status:'succeeded',result:{resourceId:'resource-test',url:'/api/fg/meilin/dramas/test/media/test',text:'测试文本'}};}
+ if(action==='task'){polls++;if(streamingText){streamPoll++;data={taskId:input.taskId,status:streamPoll===1?'running':'succeeded',replay:{deltas:streamPoll===1?[{sequence:1,content:'实时'}]:[{sequence:2,content:'正文'}]},result:{text:'实时正文'}};}else data={taskId:input.taskId,status:'succeeded',result:{resourceId:'resource-test',url:'/api/fg/meilin/dramas/test/media/test',text:'测试文本'}};}
  if(action==='costs')data={calls:[],budget:{monthlyCny:10,remainingCny:10}};
  res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(data));});
 await new Promise(r=>upstream.listen(0,'127.0.0.1',r));process.env.MEILIN_GATEWAY_URL=`http://127.0.0.1:${upstream.address().port}`;
@@ -70,6 +71,31 @@ test('creation replay uses the same project ID and another account cannot read i
  const a=await fetch(base+'/api/dramas',{method:'POST',headers,body:'{}'});assert.equal(a.status,200);assert.equal((await a.json()).id,id);
  const b=await fetch(base+'/api/dramas',{method:'POST',headers,body:'{}'});assert.equal(b.status,200);assert.equal((await b.json()).id,id);
  const path='/api/dramas/'+id;assert.equal((await fetch(base+path,{headers:contract.signIdentity(other,'GET',path,process.env.MEILIN_INTERNAL_SECRET)})).status,404);
+});
+test('an existing script skips AI planning and remains editable without a model call',async()=>{
+ await scoped(actor,async()=>{const d=brain.createDrama(),before=submissions;
+  assert.equal(d.settings.skills.script,'short-drama-factory');
+  const result=await brain.act(d,'script.start',{title:'原稿测试',text:'第一集\nA：原稿台词。',language:'中文',episodeSeconds:60});
+  assert.equal(submissions,before);assert.equal(result.nav.episode,1);assert.equal(d.stage,'ready');
+  assert.equal(d.episodes[0].scripts.upload,'第一集\nA：原稿台词。');assert.equal(d.episodes[0].chosen,null);
+  await brain.act(d,'bible.update',{value:{faces:'保持原稿人物',stylePrompt:'自然纪实光线'}});
+  assert.equal(d.bible.faces,'保持原稿人物');assert.equal(d.episodes[0].scripts.upload,'第一集\nA：原稿台词。');
+  await assert.rejects(brain.act(d,'script.start',{text:'不能覆盖'}),/已开始/);
+ });
+});
+test('streaming action sends immediate feedback and a committed final document',async()=>{
+ let d;await scoped(actor,async()=>{d=brain.createDrama();await store.save(d);});
+ const path='/api/dramas/'+d.id+'/action',headers={...contract.signIdentity(actor,'POST',path,process.env.MEILIN_INTERNAL_SECRET),'x-fg-operation-id':randomUUID(),'content-type':'application/json',accept:'text/event-stream'};
+ const r=await fetch(base+path,{method:'POST',headers,body:JSON.stringify({type:'memory.add',payload:{text:'流式操作只保存一次'}})});
+ assert.equal(r.status,200);const wire=await r.text();assert.match(wire,/event: status/);assert.match(wire,/event: final/);
+ await scoped(actor,async()=>assert.equal((await store.get(d.id)).memory.filter(m=>m.text==='流式操作只保存一次').length,1));
+});
+test('text task forwards real incremental deltas before its final result',async()=>{
+ const updates=[];streamingText=true;streamPoll=0;
+ try{await runContext({actor,models,dramaId:randomUUID(),operationId:randomUUID(),emit:(event,data)=>updates.push({event,...data})},async()=>{
+  assert.equal(await chat({model:models[0].id,system:'test',messages:[],streamPresentation:'script'}), '实时正文');
+ });assert.deepEqual(updates.filter(x=>x.event==='text').map(x=>x.text),['实时','实时正文']);}
+ finally{streamingText=false;}
 });
 test('style decoding rejects more than six references before a model call',async()=>{
  await scoped(actor,async()=>{

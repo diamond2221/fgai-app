@@ -78,6 +78,7 @@ const memoryText = (d) => (d.memory || []).map((m) => `- ${m.kind === 'fact' ? '
 export const AUDIO_RULE = '成片声音：视频只随片生成音效、对白和旁白，不带背景音乐、不带字幕；BGM 和字幕都在后期加';
 export function migrate(d) {
   d.memory ||= [];
+  if(!d.settings.scriptDefaultRevision){if(d.settings.skills.script==='fg-overseas-drama-script')d.settings.skills.script='short-drama-factory';d.settings.scriptDefaultRevision=1;}
   if(defaultModel('text')==='gpt-6.1-sol'&&(d.settings.textDefaultRevision||0)<2){d.settings.textModel='gpt-6.1-sol';d.settings.textDefaultRevision=2;}
   for(const a of d.assets?.items||[])a.id ||= randomUUID();
   if (!d.memory.some((m) => m.kind === 'rule' && m.ruleId === 'audio')) d.memory.unshift({ id: randomUUID().slice(0, 8), text: AUDIO_RULE, kind: 'rule', ruleId: 'audio', source: 'system', at: d.createdAt || iso() });
@@ -197,10 +198,10 @@ async function liveBible(d) {
 async function liveScript(d, n) {
   const id = d.settings.skills.script;
   const contract = SK.loadSkill('script', 'fg-overseas-drama-script');
-  const method = id !== 'fg-overseas-drama-script' ? `\n\n参考以下编剧技能的方法（输出仍严格遵守上面的剧本合同）：\n${SK.loadSkill('script', id)}` : '';
+  const method = id !== 'fg-overseas-drama-script' ? `\n\n使用以下编剧技能。按目标市场、用户指定语言和时长改编；管理说明用中文，原定英文对白保留并附中文。先在内部补足情绪契约、主动目标、对手赌注、回合表和连续性台账，不把内部立项问卷输出给用户。已有剧本不擅自改写。\n${SK.loadSkill('script', id, 'episode')}` : '';
   const prev = ep(d, n - 1, false);
   const prevText = prev ? prev.scripts[prev.chosen] || '' : '';
-  return chat({ model: d.settings.textModel, system: `你是海外竖屏短剧编剧，严格遵守剧本合同（第 1 节），只输出剧本正文。\n\n${contract}${method}`,
+  return chat({ model: d.settings.textModel, streamPresentation:'script',system: `你是海外竖屏短剧编剧，严格遵守剧本合同（第 1 节），只输出剧本正文。\n\n${contract}${method}`,
     messages: [{ role: 'user', content: `剧集圣经与立项：\n${ctxJSON(d)}\n\n${prevText ? `第${n - 1}集已采用剧本：\n${prevText}\n\n` : ''}请写第${n}集，约 ${d.settings.episodeSeconds} 秒。` }] });
 }
 function assetSystem(d) {
@@ -331,6 +332,7 @@ function traceFor(d, type, payload, ctx, focus) {
   const vm = byId(d.settings.videoModel);
   const range = segmentRange(vm.id);
   switch (type) {
+    case 'script.start': return [T('memory','已保存用户原稿，未调用模型')];
     case 'brief.submit': return [T('skill', '立项编辑'), T('model', via)];
     case 'brief.confirm': return [T('memory', '写入立项决定'), T('skill', '剧集圣经编辑'), T('model', via)];
     case 'style.decode': return [T('skill', SK.labelOf('style', sk.style)), T('model', via)];
@@ -396,6 +398,20 @@ async function actCore(d, type, payload = {}, ctx = {}) {
   const n = Number(payload.episode || ctx.episode || d.episodes.at(-1)?.n || 1);
   const r = (reply, nav) => ({ reply: say(d, reply), nav });
   switch (type) {
+    case 'script.start': {
+      const text=String(payload.text||'').trim();if(!text)throw Error('请粘贴或上传有正文的剧本');
+      if(text.length>200000)throw Error('单次剧本最多20万字，请按集导入');
+      if(d.episodes.some(started))throw Error('此剧已开始制作，请在对应剧集内导入，避免覆盖');
+      const title=String(payload.title||payload.name||'导入剧本').trim().slice(0,120)||'导入剧本';
+      const seconds=Number(payload.episodeSeconds||90);if(!Number.isFinite(seconds)||seconds<15||seconds>600)throw Error('单集时长须为15–600秒');
+      const language=String(payload.language||'英文台词，中文制作说明');
+      d.titleZh=title;d.title='';d.settings.episodeSeconds=seconds;d.settings.language=language;
+      d.brief={idea:'使用用户原稿',premise:'',premiseZh:title,genre:'按原稿',market:'按原稿',language,episodes:1,episodeSeconds:seconds,protagonist:'按原稿',questions:[],confirmed:true,sample:false};
+      d.bible={title:'',titleZh:title,logline:'',loglineZh:'按导入剧本制作，不擅自改变情节。',faces:'按原稿及用户参考图，不根据画风推断族裔。',performance:'按原稿人物与场景。',rules:['保留原稿情节、角色与对白语言。'],cast:[],style:ST.styleFromPreset(ST.OVERSEAS[0]),confirmed:true};
+      const e=ep(d,1);e.scripts.upload=text;e.uploadName=payload.name||'粘贴剧本';d.stage='ready';
+      remember(d,'剧本来源：用户原稿，已跳过 AI 立项；圣经与画风可随时编辑，尚未调用模型。');
+      return r('原稿已保存，无需重新立项。请核对剧本，再选择“采用这一版”提取资产；提取时会调用文本模型。',{episode:1,stage:'script'});
+    }
     // ----- settings -----
     case 'settings.model': {
       const m = byId(payload.model);
@@ -504,6 +520,7 @@ async function actCore(d, type, payload = {}, ctx = {}) {
       d.brief.confirmed = true;
       remember(d, `立项：${d.brief.premiseZh}（${d.brief.genre}，${d.brief.market}，${d.brief.episodes} 集 × ${d.brief.episodeSeconds} 秒）`);
       for (const q of (d.brief.questions || []).filter((x) => x.id !== 'length')) remember(d, `${q.q.replace(/[？?]$/, '')}：${q.options[q.pick]}`);
+      if(d.bible){d.bible.confirmed=false;d.stage='bible';return r('立项修改已确认，原圣经、画风及产物保留。请核对圣经后重新确认。',{stage:'bible'});}
       const b = payload.manual ? {title:d.title||'',titleZh:d.titleZh||'未命名剧集',loglineZh:d.brief.premiseZh,faces:'',performance:'',rules:[],cast:[]} : live ? await liveBible(d) : structuredClone(S.SAMPLE_BIBLE);
       const preset = ST.findPreset(b.styleId) || ST.OVERSEAS[0];
       d.bible = { ...b, style: ST.styleFromPreset(preset), confirmed: false };
@@ -1075,6 +1092,7 @@ shoot.submit{episode,res:"preview"|"final",ns?,model?} post.open{episode} episod
 async function liveTurn(d, t, ctx) {
   const where = ctx.episode ? `第 ${ctx.episode} 集 · ${ep(d, ctx.episode).stage}` : `剧集层 · ${d.stage}`;
   const out = await chat({
+    streamPresentation:'reply',
     model: d.settings.textModel,
     system: `你是美林，FG 的海外 AI 短剧超级导演。你是这部剧专属的导演，从立项到最后一集都记得之前的决定。成员是审核员：你先给方案，他们确认或提一句修改。用中文简短回答（不超过 3 句）。成员说"记住/以后/每一集都…"时用 memory.add 记下。
 本剧记忆：

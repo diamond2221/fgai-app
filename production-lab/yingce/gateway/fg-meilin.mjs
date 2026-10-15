@@ -38,7 +38,7 @@ export function meilinTaskInput(selected,channel,request,drama,refs){
  const maxTokens=Math.min(32768,Math.max(1,Number(p.max_tokens)||8000));
  return {type:'canvas_'+mode,model:selected.billingId,operation,prompt,input:{mode,prompt,
   config:{channelId:channel.id||channel.channel_id,model:selected.billingId,interfaceType:channel.protocol,apiFormat:channel.api_format||'openai',count:'1',...options},
-  ...(mode==='text'?{agentRequests:{chatCompletion:{...p,model:selected.billingId,stream:false,max_tokens:maxTokens}},textOptions:{stream:false,maxOutputTokens:maxTokens}}:{referenceImages:refs.image||[],referenceVideos:refs.video||[],referenceAudios:refs.audio||[]}),
+  ...(mode==='text'?{agentRequests:{chatCompletion:{...p,model:selected.billingId,stream:true,max_tokens:maxTokens}},textOptions:{stream:true,maxOutputTokens:maxTokens}}:{referenceImages:refs.image||[],referenceVideos:refs.video||[],referenceAudios:refs.audio||[]}),
   metadata:{source:'fg-meilin',clientOperationId:'meilin-'+request.operationId,meilinDramaId:drama,...request.metadata}}};
 }
 async function ownerAPI(pool,id,ctx){
@@ -81,7 +81,7 @@ async function uploadReference(ref,owner,ctx,projectId,drama){
  const r=await fetch(new URL('/api/resources',ctx.web),{method:'POST',headers:{cookie:owner.cookie,origin:ctx.publicOrigin,'x-idempotency-key':'meilin-ref-'+digest([owner.actor.id,bytes.toString('base64')])},body:form,signal:AbortSignal.timeout(120000)});const b=await r.json();if(!r.ok||b.code!==0)throw Error(b.msg||'素材未保存到 NAS');
  return {id:b.data.resource.id,storageKey:'resource:'+b.data.resource.id,name:ref.name||'参考',type:mime,...(ref.role?{role:ref.role}:{})};
 }
-async function taskView(pool,link,ctx){
+async function taskView(pool,link,ctx,after){
  const owner=await ownerAPI(pool,link.actor_id,ctx),data=await owner.api('/tasks/'+link.task_id),task=data.task||data;
  let result={};if(task.status==='succeeded'){
   const raw=JSON.parse(task.resultJson||'{}');result.text=raw.text;
@@ -91,7 +91,8 @@ async function taskView(pool,link,ctx){
   if(resourceId)result={...result,resourceId,url:`/api/fg/meilin/dramas/${link.drama_id}/media/${link.task_id}`};
   if(!result.text&&!resourceId)return {taskId:link.task_id,status:'archiving',error:'生成已完成，等待 NAS 结果归档'};
  }
- return {taskId:link.task_id,status:task.status,result,error:task.error||null};
+ const replay=after!==undefined&&task.type?.startsWith('canvas_text')?await owner.api('/tasks/'+link.task_id+'/text-deltas?after='+Math.max(0,Number(after)||0)):undefined;
+ return {taskId:link.task_id,status:task.status,result,error:task.error||null,...(replay?{replay}:{})};
 }
 export async function meilinInternalRoute(req,res,ctx){
  const match=/^\/internal\/meilin\/([^/]+)\/([^/]+)\/(catalog|quote|submit|task|costs)$/.exec(ctx.path.pathname);if(!match)return false;
@@ -107,7 +108,7 @@ export async function meilinInternalRoute(req,res,ctx){
    json(res,200,{calls:rows.map(c=>{const estimatedCny=estimateCNY(c,prices.get(c.model),fx);const {request_body,response_body,...safe}=c;return {...safe,estimatedCny,settledCny:c.settled_cny===null?null:Number(c.settled_cny)};}),budget:await budgetView(ctx.pool,actorId)});return true;
   }
   if(action==='task'){
-   const link=(await ctx.pool.query('SELECT * FROM fg_meilin_calls WHERE drama_id=$1 AND task_id=$2',[drama,input.taskId])).rows[0];if(!link)throw Error('任务不属于此剧');json(res,200,await taskView(ctx.pool,link,ctx));return true;
+   const link=(await ctx.pool.query('SELECT * FROM fg_meilin_calls WHERE drama_id=$1 AND task_id=$2',[drama,input.taskId])).rows[0];if(!link)throw Error('任务不属于此剧');json(res,200,await taskView(ctx.pool,link,ctx,input.after));return true;
   }
   // Resume an admitted operation before checking today's model catalog. A
   // disabled model blocks new admission, not recovery of already-created work.

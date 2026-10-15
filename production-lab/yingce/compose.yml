@@ -53,6 +53,9 @@ services:
       retries: 15
   backend:
     image: ${CANVAS_BACKEND_IMAGE:?required}
+    # Docker's host DNS can retain NXDOMAIN for provider media domains.
+    # Keep Docker service discovery; explicitly resolve public upstreams.
+    dns: ["${FG_SIX_DNS_PRIMARY:-1.1.1.1}", "${FG_SIX_DNS_SECONDARY:-223.5.5.5}"]
     # NAS SMB ownership is managed by the host mount, as in FG Studio.
     user: "0:0"
     restart: "no"

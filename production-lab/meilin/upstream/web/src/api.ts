@@ -55,7 +55,9 @@ export type Drama = {
   memory?: Memory[];
   music: { main: string; sting: string };
 };
-export type DramaSummary = { id: string; title: string; titleZh: string; premise: string; stage: string; updatedAt: string; episodes: number; done: number; planned: number; cover: string; palette: string[] };
+export type DramaSummary = { id: string; canDelete?:boolean; title: string; titleZh: string; premise: string; stage: string; updatedAt: string; episodes: number; done: number; planned: number; cover: string; palette: string[] };
+export type ExistingScript = {title:string;text:string;file?:File;episodeSeconds:number;language:string};
+export type StreamUpdate = {event:string;data:{text?:string;action?:string}};
 export type Inspiration = { id: string; title: string; description: string; mode: string; prompt: string; image: string; source: string; credit?: string };
 export type Nav = { view?: string; episode?: number; stage?: string };
 export type Ctx = { episode?: number };
@@ -66,7 +68,7 @@ const integrated=window.location.pathname.includes('/meilin-app');
 const fgPrefix=window.location.pathname.startsWith('/fg-six/')?'/fg-six':'';
 export const apiURL=(path:string)=>integrated?fgPrefix+'/api/fg/meilin'+path.replace(/^\/api/,''):path;
 const mapURLs=(value:any):any=>Array.isArray(value)?value.map(mapURLs):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,mapURLs(v)])):typeof value==='string'&&value.startsWith('/api/fg/meilin/')?fgPrefix+value:typeof value==='string'&&value.startsWith('/styles/')&&integrated?fgPrefix+'/meilin-app'+value:value;
-async function req<T>(url: string, body?: unknown, method?: string): Promise<T> {
+async function req<T>(url: string, body?: unknown, method?: string, onUpdate?:(update:StreamUpdate)=>void): Promise<T> {
   const verb=method || (body ? 'POST' : 'GET'),raw=body?JSON.stringify(body):undefined;
   let key='',operationId='';
   if(!['GET','HEAD'].includes(verb)){
@@ -74,7 +76,17 @@ async function req<T>(url: string, body?: unknown, method?: string): Promise<T> 
     key='meilin.request.'+Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
     operationId=sessionStorage.getItem(key)||crypto.randomUUID();sessionStorage.setItem(key,operationId);
   }
-  const r = await fetch(apiURL(url), { method:verb, headers: {...(body?{'content-type':'application/json'}:{}),...(operationId?{'x-fg-operation-id':operationId}:{})}, body:raw,credentials:'same-origin' });
+  const r = await fetch(apiURL(url), { method:verb, headers: {...(body?{'content-type':'application/json'}:{}),...(operationId?{'x-fg-operation-id':operationId}:{}),...(onUpdate?{accept:'text/event-stream'}:{})}, body:raw,credentials:'same-origin' });
+  if(onUpdate&&r.ok&&r.headers.get('content-type')?.includes('text/event-stream')){
+    if(!r.body)throw Error('流式连接不可用，请刷新后查看原操作结果');
+    const reader=r.body.getReader(),decoder=new TextDecoder();let buffer='',final:T|undefined;
+    while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value,{stream:!done});let end;
+      while((end=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,end);buffer=buffer.slice(end+2);const event=/^event: (.+)$/m.exec(block)?.[1],rawData=/^data: (.+)$/m.exec(block)?.[1];if(!event||!rawData)continue;
+        const data=JSON.parse(rawData);if(event==='error')throw Error(data.error);if(event==='final')final=mapURLs(data) as T;else onUpdate({event,data});
+      }if(done)break;
+    }
+    if(!final)throw Error('连接中断，原操作可能仍在处理；请刷新查看，不要重复提交。');if(key)sessionStorage.removeItem(key);return final;
+  }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `请求失败（${r.status}）`);
   if(key)sessionStorage.removeItem(key);
@@ -93,8 +105,8 @@ export const api = {
   create: (direction: string) => req<Drama>('/api/dramas', { direction }),
   get: (id: string) => req<Drama>(`/api/dramas/${id}`),
   remove: (id: string) => req<{ ok: true }>(`/api/dramas/${id}`, undefined, 'DELETE'),
-  turn: (id: string, text: string, ctx: Ctx) => req<Reply>(`/api/dramas/${id}/turn`, { text, ctx }),
-  action: (id: string, type: string, payload: Record<string, unknown> = {}, ctx: Ctx = {}) => req<Reply>(`/api/dramas/${id}/action`, { type, payload, ctx }),
+  turn: (id: string, text: string, ctx: Ctx, onUpdate?:(update:StreamUpdate)=>void) => req<Reply>(`/api/dramas/${id}/turn`, { text, ctx },undefined,onUpdate),
+  action: (id: string, type: string, payload: Record<string, unknown> = {}, ctx: Ctx = {}, onUpdate?:(update:StreamUpdate)=>void) => req<Reply>(`/api/dramas/${id}/action`, { type, payload, ctx },undefined,onUpdate),
   upload: (id: string, body: Record<string, unknown>) => req<Reply>(`/api/dramas/${id}/upload`, body),
   next: (id: string, episode?: number | null) => req<{ next: NextStep[]; memory: number }>(`/api/dramas/${id}/next?episode=${episode || ''}`),
   inspirations: (q: string, mode: string, offset = 0) => req<{ connected: boolean; total: number; items: Inspiration[] }>(`/api/inspirations?q=${encodeURIComponent(q)}&mode=${mode}&offset=${offset}`),

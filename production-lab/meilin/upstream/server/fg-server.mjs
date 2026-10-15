@@ -15,6 +15,7 @@ import * as styles from './styles.mjs';
 import * as presets from './presets.mjs';
 import * as production from './fg-production.mjs';
 import {planningPrompts} from './planning.mjs';
+import {visibleReply} from './turn-stream.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url)),dist=join(root,'web/dist');
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.mp4':'video/mp4','.mp3':'audio/mpeg','.wav':'audio/wav','.woff2':'font/woff2'};
@@ -67,7 +68,13 @@ export function createMeilinServer(){return createServer(async(req,res)=>{
    if(['srt','prompts','next'].includes(sub)&&req.method==='GET'){const d=await store.get(id);if(!d)return send(res,404,{error:'剧目不存在'});brain.migrate(d);const n=Number(url.searchParams.get('episode')||1);if(sub==='next')return send(res,200,{next:brain.nextSteps(d,{episode:n}),memory:d.memory.length});return send(res,200,'\uFEFF'+(sub==='srt'?brain.srt(d,n):brain.promptsText(d,n)),'text/plain; charset=utf-8',{'content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(`EP${n}.${sub==='srt'?'srt':'txt'}`)}`});}
    if(['turn','action','upload','confirm','cancel','requote'].includes(sub)&&req.method==='POST'){
     if(!uuid.test(context().operationId||''))return send(res,400,{error:'操作缺少稳定编号'});
-    const input=await body(req);context().episode=input.ctx?.episode;context().action=input.type||sub;await catalog();
+    const input=await body(req);context().episode=input.ctx?.episode;context().action=input.type||sub;
+    const streaming=req.headers.accept?.includes('text/event-stream');let heartbeat;
+    if(streaming){res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-store','x-accel-buffering':'no'});res.flushHeaders();
+     context().emit=(event,data)=>{if(res.destroyed)return;if(event==='text'&&data.format==='reply')data={...data,text:visibleReply(data.text)};res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);};
+     context().emit('status',{text:'已收到，正在准备本剧上下文。'});heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': keepalive\n\n');},15000);res.on('close',()=>clearInterval(heartbeat));
+    }
+    try{await catalog();
     const out=await withDrama(id,async d=>{
      d.requests ||= {};const requestId=context().operationId;if(d.requests[requestId])return {reply:d.requests[requestId].reply||'原操作已完成，未重复提交'};
      let result;
@@ -77,11 +84,12 @@ export function createMeilinServer(){return createServer(async(req,res)=>{
      else if(sub==='action')result=await brain.act(d,input.type,input.payload||{},input.ctx||{});
      else{
       const up=await files.saveDataUrl(input.dataUrl,input.name);const meta={id:up.id,name:up.name,mime:up.mime,size:up.size,url:up.url,purpose:input.purpose||'asset',palette:input.palette||[],at:new Date().toISOString()};d.uploads.push(meta);result={reply:'素材已保存',upload:meta};
-      if(meta.purpose==='script')result={...await brain.act(d,'script.upload',{text:files.textOf(up),name:up.name,episode:input.episode},input.ctx||{}),upload:meta};
+      if(['script','script-start'].includes(meta.purpose))result={...await brain.act(d,meta.purpose==='script-start'?'script.start':'script.upload',{...input.spec,text:files.textOf(up),name:up.name,episode:input.episode},input.ctx||{}),upload:meta};
       if(meta.purpose==='asset'&&(input.code||input.kind))result={...await brain.act(d,'assets.upload',{upload:meta.id,code:input.code,kind:input.kind,name:input.assetName,episode:input.episode},input.ctx||{}),upload:meta};
      }
      d.requests[requestId]={reply:result.reply,at:new Date().toISOString()};return result;
-    });return send(res,200,out);
+    });if(streaming){context().emit('final',out);res.end();return;}return send(res,200,out);
+    }catch(e){if(!streaming)throw e;context().emit('error',{error:e.message});res.end();return;}finally{clearInterval(heartbeat);}
    }
   }
   if(path.startsWith('/files/')&&['GET','HEAD'].includes(req.method)){const name=validateRelativeFile(path.slice(7));if(!await db.fileAccess(name))return send(res,404,{error:'素材不存在'});return file(res,req,files.FILES_DIR,name,!/\.(png|jpg|jpeg|webp|gif|mp4|mp3|wav|m4a)$/i.test(name));}

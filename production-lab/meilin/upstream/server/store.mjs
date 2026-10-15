@@ -9,7 +9,7 @@ const DIR = process.env.FG_DIRECTOR_DATA || join(dirname(fileURLToPath(import.me
 const safe = (id) => /^[a-z0-9-]{8,64}$/.test(id);
 
 export async function list() {
-  if(integrated)return (await fg.list()).map(p=>({id:p.id,title:p.title||'',titleZh:p.titleZh||'',premise:p.brief?.premiseZh||'',stage:p.stage,updatedAt:p.updatedAt,episodes:p.episodes.length,done:p.episodes.filter(e=>e.done).length,planned:p.brief?.episodes||0,cover:p.bible?.style?.image||'',palette:p.bible?.style?.palette||[]}));
+  if(integrated)return (await fg.list()).map(p=>({id:p.id,canDelete:p.canDelete,title:p.title||'',titleZh:p.titleZh||'',premise:p.brief?.premiseZh||'',stage:p.stage,updatedAt:p.updatedAt,episodes:p.episodes.length,done:p.episodes.filter(e=>e.done).length,planned:p.brief?.episodes||0,cover:p.bible?.style?.image||'',palette:p.bible?.style?.palette||[]}));
   await mkdir(DIR, { recursive: true });
   const files = (await readdir(DIR)).filter((f) => f.endsWith('.json'));
   const items = [];

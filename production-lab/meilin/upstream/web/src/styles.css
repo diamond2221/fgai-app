@@ -504,8 +504,17 @@ a { color: var(--signal); }
 .sphere-fallback::before { content: '这台设备不支持 WebGL，请用网格查看。'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-2); }
 
 /* ================= script ================= */
-.lane-tabs { display: none; margin-bottom: 14px; }
-.compare { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.lane-tabs { display: inline-flex; margin-bottom: 14px; }
+.compare { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.compare .lane { display: none; }
+.compare[data-lane='aistudio'] .lane[data-id='aistudio'], .compare[data-lane='sonnet'] .lane[data-id='sonnet'], .compare[data-lane='upload'] .lane[data-id='upload'] { display: flex; }
+.poster-open { display:flex;flex-direction:column;width:100%;padding:0;border:0;background:transparent;text-align:left;color:inherit; }
+.poster-actions { display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--line);font-size:12px; }
+.script-import { display:grid;gap:12px;margin-top:16px;padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg); }
+.script-import label { display:grid;gap:6px; }
+.operation-feedback { position:fixed;z-index:100;right:24px;bottom:90px;width:min(560px,calc(100vw - 48px));max-height:55vh;overflow:auto;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-2);display:grid;gap:8px; }
+.operation-feedback small { color:var(--ink-2); }
+.operation-feedback pre { white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit; }
 .lane { border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; background: var(--surface); display: flex; flex-direction: column; min-width: 0; transition: border-color 0.3s, box-shadow 0.3s; }
 .lane.chosen { border-color: rgba(10, 148, 102, 0.5); box-shadow: 0 0 0 3px var(--ok-soft); }
 .lane-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }

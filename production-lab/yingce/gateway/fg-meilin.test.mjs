@@ -21,5 +21,7 @@ test('native task carries stable operation and project attribution for recovery'
  assert.equal(x.input.metadata.source,'fg-meilin');
  assert.equal(x.input.metadata.meilinDramaId,'drama');
  assert.equal(x.input.textOptions.maxOutputTokens,200);
+ assert.equal(x.input.textOptions.stream,true);
+ assert.equal(x.input.agentRequests.chatCompletion.stream,true);
  assert.equal(x.input.agentRequests.chatCompletion.max_tokens,200);
 });

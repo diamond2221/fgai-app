@@ -30,7 +30,7 @@ export async function save(d){
  d._revision=revision;if(_revision===undefined)d._ownerId=actor;
  d.updatedAt=doc.updatedAt;return d;
 }
-export async function list(){const db=await database();return (await db.query(`SELECT d.document FROM fg_meilin_dramas d WHERE d.deleted_at IS NULL AND (owner_id=$1 OR EXISTS(SELECT 1 FROM fg_meilin_members WHERE drama_id=d.id AND user_id=$1)) ORDER BY updated_at DESC`,[auth()])).rows.map(x=>x.document);}
+export async function list(){const db=await database();return (await db.query(`SELECT d.document,d.owner_id FROM fg_meilin_dramas d WHERE d.deleted_at IS NULL AND (owner_id=$1 OR EXISTS(SELECT 1 FROM fg_meilin_members WHERE drama_id=d.id AND user_id=$1)) ORDER BY updated_at DESC`,[auth()])).rows.map(x=>({...x.document,canDelete:x.owner_id===auth()}));}
 export async function remove(id){const db=await database(),actor=auth(),client=await db.connect();try{
  await client.query('BEGIN');const r=await client.query('UPDATE fg_meilin_dramas SET deleted_at=now() WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL RETURNING id',[id,actor]);if(!r.rowCount)throw Error('只有所有者可以删除剧目');
  await client.query('INSERT INTO fg_meilin_events(drama_id,actor_id,action,detail) VALUES($1,$2,$3,$4)',[id,actor,'delete',{}]);await client.query('COMMIT');

@@ -6,7 +6,7 @@ import SidePanel from './components/SidePanel';
 import Home from './components/Home';
 import SettingsDrawer from './components/SettingsDrawer';
 import Caption from './components/Caption';
-import { api, Config, Drama, DramaSummary, Nav, Reply } from './api';
+import { api, Config, Drama, DramaSummary, Nav, Reply, ExistingScript, StreamUpdate } from './api';
 import { Ctx, DirectorCtx } from './lib/ctx';
 import { burst, installPointerFx } from './lib/fx';
 import { extractPalette, readAsDataUrl } from './lib/files';
@@ -32,6 +32,11 @@ export default function App() {
   const [drama, setDrama] = useState<Drama | null>(null);
   const [loc, setLoc] = useState<Loc>({ kind: 'home' });
   const [busy, setBusy] = useState(false);
+  const [busyText,setBusyText]=useState('');
+  const [streamText,setStreamText]=useState('');
+  const [busySeconds,setBusySeconds]=useState(0);
+  useEffect(()=>{setBusySeconds(0);if(!busy){setStreamText('');return;}const t=window.setInterval(()=>setBusySeconds(v=>v+1),1000);return()=>clearInterval(t);},[busy]);
+  const updateStream=useCallback(({event,data}:StreamUpdate)=>{if(event==='status')setBusyText(data.text||'正在处理');if(event==='text'){setStreamText(data.text||'');setBusyText(data.action==='turn'?'美林正在回复':'正在生成正文，完成后自动保存');}},[]);
   const [listening, setListening] = useState(false);
   const [caption, setCaption] = useState('');
   const [captionKey, setCaptionKey] = useState(0);
@@ -61,10 +66,10 @@ export default function App() {
     return drama.assets.items.some((a) => a.status === 'rendering') || drama.episodes.some((e) => e.jobs.some((j) => !['done','failed','cancelled'].includes(j.status)));
   }, [drama]);
   useEffect(() => {
-    if (!pending || !drama) return;
-    const t = window.setInterval(() => api.get(drama.id).then(setDrama).catch(() => {}), 900);
+    if (!pending || !drama || busy) return;
+    let loading=false;const t = window.setInterval(async()=>{if(loading)return;loading=true;try{setDrama(await api.get(drama.id));}catch{/* Next background poll retries the read. */}finally{loading=false;}}, 5000);
     return () => window.clearInterval(t);
-  }, [pending, drama?.id]);
+  }, [pending, drama?.id,busy]);
 
   const toast = useCallback((t: string) => {
     setToastText(t);
@@ -120,9 +125,10 @@ export default function App() {
     if (!drama) return false;
     if(drama.permissions?.canEdit===false){setError('此剧为只读分享，无法修改或生成。');return false;}
     setBusy(true);
+    setBusyText('已收到，正在保存或执行操作。');setStreamText('');
     setError('');
     try {
-      const r = await api.action(drama.id, type, { ...(episode && !payload.episode ? { episode } : {}), ...payload }, ctxOf());
+      const r = await api.action(drama.id, type, { ...(episode && !payload.episode ? { episode } : {}), ...payload }, ctxOf(),updateStream);
       apply(r);
       if (opts.from) burst(opts.from);
       return true;
@@ -133,9 +139,10 @@ export default function App() {
     if (!drama || !text.trim()) return;
     if(drama.permissions?.canEdit===false){setError('此剧为只读分享，无法发送制作指令。');return;}
     setBusy(true);
+    setBusyText('已收到，正在读取本剧上下文。');setStreamText('');setSide('chat');
     setError('');
     setDrama({ ...drama, messages: [...drama.messages, { id: `tmp-${Date.now()}`, role: 'user', text, at: new Date().toISOString() }] });
-    try { apply(await api.turn(drama.id, text, ctxOf())); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+    try { apply(await api.turn(drama.id, text, ctxOf(),updateStream)); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }, [drama, episode, apply]);
 
   const upload = useCallback(async (file: File, body: Record<string, unknown>) => {
@@ -153,29 +160,29 @@ export default function App() {
   }, [drama, episode, apply]);
 
   const openDrama = async (id: string) => {
+    if(busy)return;setBusy(true);setBusyText('正在打开剧目…');
     try {
       const d = await api.get(id);
       setDrama(d);
       setLoc(d.stage === 'ready' ? { kind: 'drama', view: 'episodes' } : { kind: 'drama', view: d.stage });
       const last = [...d.messages].reverse().find((m) => m.role === 'agent');
       if (last) speak(last.text);
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) { setError(e.message); }finally{setBusy(false);}
   };
 
-  const create = async (direction: string, idea?: string) => {
+  const create = async (direction: string, idea?: string, script?:ExistingScript) => {
+    if(busy)return;setBusy(true);setBusyText('正在创建剧目…');setError('');
     try {
       const d = await api.create(direction);
       setDrama(d);
       setLoc({ kind: 'drama', view: 'brief' });
       speak(d.messages[0]?.text || '');
-      if (idea) {
-        setBusy(true);
-        apply(await api.turn(d.id, idea, {}));
-        setBusy(false);
-      }
+      if(script){if(script.file){if(script.file.size>25*1024*1024)throw Error('文件超过25MB');apply(await api.upload(d.id,{purpose:'script-start',dataUrl:await readAsDataUrl(script.file),name:script.file.name,spec:{title:script.title,episodeSeconds:script.episodeSeconds,language:script.language}}));}else apply(await api.action(d.id,'script.start',{...script,file:undefined},{},updateStream));}
+      else if (idea) apply(await api.turn(d.id, idea, {},updateStream));
       setDramas(await api.list());
-    } catch (e: any) { setError(e.message); setBusy(false); }
+    } catch (e: any) { setError(e.message); }finally{setBusy(false);}
   };
+  const removeDrama=async(id:string)=>{if(busy)return;setBusy(true);setBusyText('正在删除剧目…');setError('');try{await api.remove(id);setDramas(v=>v.filter(d=>d.id!==id));toast('剧目已删除');return true;}catch(e:any){setError(e.message);return false;}finally{setBusy(false);}};
 
   const home = async () => {
     setSharing(false);
@@ -262,7 +269,8 @@ export default function App() {
         </div>
       </header>
 
-      {!drama && <Home config={config} dramas={dramas} onCreate={create} onOpen={openDrama} orb={<Orb state={orbState} levelRef={levelRef} fill={0.62} />} />}
+      {!drama && <Home config={config} dramas={dramas} busy={busy} onRemove={removeDrama} onCreate={create} onOpen={openDrama} orb={<Orb state={orbState} levelRef={levelRef} fill={0.62} />} />}
+      {busy&&<aside className="operation-feedback" role="status" aria-live="polite"><b>{busyText||'正在处理…'} · {busySeconds} 秒</b><small>请勿重复点击。页面保持连接，结果完成后自动保存。</small>{streamText&&<pre>{streamText}</pre>}</aside>}
 
       {drama && ctx && (
         <Ctx.Provider value={ctx}>

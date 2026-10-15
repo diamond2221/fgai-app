@@ -34,7 +34,28 @@ func fgMediaScope(db *gorm.DB, table, grantTable, grantColumn, userID string) *g
 	if table == "resources" {
 		company = " OR EXISTS (SELECT 1 FROM fg_company_assets ca WHERE ca.resource_id=resources.id)"
 	}
-	return db.Where("("+table+".user_id = ? OR EXISTS (SELECT 1 FROM "+grantTable+" g JOIN fg_story_projects fg ON fg.native_project_id=g.project_id WHERE g."+grantColumn+"="+table+".id)"+company+fgMemberManagementScope(db, userID, table+".user_id")+")", userID)
+	condition := "(" + table + ".user_id = ? OR EXISTS (SELECT 1 FROM " + grantTable + " g JOIN fg_story_projects fg ON fg.native_project_id=g.project_id WHERE g." + grantColumn + "=" + table + ".id)" + company + fgMemberManagementScope(db, userID, table+".user_id")
+	args := []any{userID}
+	lookup := db.Session(&gorm.Session{NewDB: true})
+	// A collaborator may bind their own media inside somebody else's project.
+	// The persisted project link grants its owner access, without publishing it
+	// to unrelated members or making the collaborator's other media visible.
+	if lookup.Migrator().HasTable(&model.ProjectAssetLink{}) {
+		projects := fgProjectScope(lookup.Table("projects"), "projects", userID).Select("projects.id")
+		if table == "assets" {
+			condition += " OR EXISTS (SELECT 1 FROM project_asset_links pal WHERE pal.asset_id=assets.id AND pal.project_id IN (?))"
+			args = append(args, projects)
+		} else if table == "resources" && lookup.Migrator().HasTable(&model.AssetRepresentation{}) && lookup.Migrator().HasTable(&model.AssetVersion{}) {
+			condition += " OR EXISTS (SELECT 1 FROM asset_representations ar JOIN asset_versions av ON av.id=ar.asset_version_id JOIN project_asset_links pal ON pal.asset_id=av.asset_id WHERE ar.resource_id=resources.id AND pal.project_id IN (?))"
+			args = append(args, projects)
+		}
+	}
+	if table == "resources" && lookup.Migrator().HasTable(&model.ShotArtifact{}) {
+		projects := fgProjectScope(lookup.Table("projects"), "projects", userID).Select("projects.id")
+		condition += " OR EXISTS (SELECT 1 FROM shot_artifacts sa WHERE sa.resource_id=resources.id AND sa.project_id IN (?))"
+		args = append(args, projects)
+	}
+	return db.Where(condition+")", args...)
 }
 func (r *Repository) FGSharedProject(id string) bool {
 	if !fgTeamEnabled() || id == "" {

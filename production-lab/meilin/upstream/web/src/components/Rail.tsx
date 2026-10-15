@@ -54,6 +54,8 @@ export default function Rail({ loc, onLoc }: { loc: Loc; onLoc: (l: Loc) => void
         </ol>
         <p className="rail-sec">全剧</p>
         <ol>
+          <Item id="brief" name="修改立项" state="todo" viewing={false} onClick={()=>onLoc({kind:'drama',view:'brief'})}/>
+          <Item id="bible" name="修改圣经与画风" state="todo" viewing={false} onClick={()=>onLoc({kind:'drama',view:'bible'})}/>
           <Item id="assets" name="全剧资产" state="todo" viewing={false} count={drama.assets.items.length} onClick={() => onLoc({ kind: 'drama', view: 'assets' })} />
           <Item id="memory" name="长期记忆" state="todo" viewing={false} count={drama.memory?.length || 0} onClick={() => onLoc({ kind: 'drama', view: 'memory' })} />
           <Item id="costs" name="费用" state="todo" viewing={false} onClick={() => onLoc({ kind: 'drama', view: 'costs' })} />
