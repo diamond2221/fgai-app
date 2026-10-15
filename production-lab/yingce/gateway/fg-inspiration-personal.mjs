@@ -20,7 +20,7 @@ export async function personalInspirationState(pool,userId){
  return {custom:row?.custom||[],favorites:row?.favorites||[]};
 }
 export async function sharedPersonalInspirations(pool){
- const rows=(await pool.query("SELECT p.user_id,p.custom,u.display_name,u.username FROM fg_inspiration_personal p JOIN users u ON u.id=p.user_id")).rows;
+ const rows=(await pool.query("SELECT p.user_id,p.custom,u.display_name,u.username FROM fg_inspiration_personal p JOIN users u ON u.id=p.user_id WHERE NOT EXISTS(SELECT 1 FROM fg_accounts a WHERE a.user_id=p.user_id AND a.email='test@beva.com')")).rows;
  return rows.flatMap(row=>row.custom.map(entry=>({...entry,ownerId:row.user_id,creatorName:row.display_name||row.username,sourceName:'个人灵感 · '+(row.display_name||row.username)})));
 }
 async function readBody(req){let size=0,chunks=[];for await(const c of req){size+=c.length;if(size>4*1024*1024)throw Error('导入内容最多 4 MB');chunks.push(c);}return JSON.parse(Buffer.concat(chunks).toString('utf8'));}

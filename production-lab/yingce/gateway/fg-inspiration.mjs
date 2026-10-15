@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {DEFAULT_PROMPT_SOURCES,parseJsonSource,parseMarkdownSource,promptImageOriginalUrl} from './fg-inspiration-parser.mjs';
 import {catalogSources,normalizeCatalog} from './fg-inspiration-catalog.mjs';
 import {initializePersonalInspiration,personalInspirationRoute,personalInspirationState,sharedPersonalInspirations} from './fg-inspiration-personal.mjs';
+import {isPublicDemo} from './fg-public-demo.mjs';
 
 export const inspirationSources=[...DEFAULT_PROMPT_SOURCES.map(s=>({...s,kind:/seedance/i.test(s.id)?'video':'image'})),...catalogSources];
 export const inspirationCategories=[
@@ -117,7 +118,7 @@ export async function inspirationRoute(req,res,{pool,actor,path}){
   return r.entries.map(e=>{const fallback=!e.cover?bundledCovers.get(e.id):undefined;return {...e,...(fallback?{cover:fallback.cover,media:fallback.media}:{}),kind:source?.kind==='video'?'video':e.kind,playable:e.media.some(m=>m.kind==='video')};});
  });
  const personal=await personalInspirationState(pool,actor.id);
- allEntries.unshift(...await sharedPersonalInspirations(pool),...textTemplates);
+ allEntries.unshift(...(isPublicDemo(actor)?personal.custom:await sharedPersonalInspirations(pool)),...textTemplates);
  const entries=distinctInspiration(allEntries,personal.favorites);
  const id=path.pathname.match(/^\/api\/fg\/inspiration\/items\/([a-f0-9]{24})$/)?.[1];
  if(id){const item=entries.find(e=>e.id===id)||allEntries.find(e=>e.id===id);send(item||null,item?200:404);return true;}
