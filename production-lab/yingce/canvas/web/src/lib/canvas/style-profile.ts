@@ -160,7 +160,9 @@ export function parseStyleProfile(value?: string | null): StyleProfileSnapshot |
     const raw = String(value || "").trim();
     if (!raw || new TextEncoder().encode(raw).length > MAX_PROFILE_BYTES) return null;
     try {
-        const parsed = JSON.parse(raw) as Partial<StyleProfileSnapshot>;
+        // Older Go responses emit null for unset optional asset fields. Omit
+        // those fields before validating, including already persisted styles.
+        const parsed = JSON.parse(raw, (key, value) => value === null && ["enabled", "weight", "parameters", "license", "steps", "cfg", "baseModels", "triggerWords", "referenceUrls", "referenceResourceIds"].includes(key) ? undefined : value) as Partial<StyleProfileSnapshot>;
         if (
             parsed.schemaVersion !== 1 ||
             typeof parsed.presetId !== "string" ||

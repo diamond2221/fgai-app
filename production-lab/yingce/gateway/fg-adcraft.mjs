@@ -4,12 +4,12 @@ import {createHmac, createHash, randomUUID, timingSafeEqual} from 'node:crypto';
 import {pipeline} from 'node:stream';
 import {priceQuote} from './fg-quotes.mjs';
 import {responseHeaders} from './policy.mjs';
-import {advertisingModels,selectedAdvertisingModel} from './fg-adcraft-models.mjs';
+import {advertisingModels,selectedAdvertisingModel,companyModelChannel} from './fg-adcraft-models.mjs';
 import {admissionPrice} from './fg-budgets.mjs';
 import {purgeArchivedAdvertising} from './fg-adcraft-retention.mjs';
 
 const uuid=/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-const models={text:'claude-sonnet-5-5-t3a',image:'seedream-5-0-lite-260128',video:'doubao-seedance-2-0-fast-filter-off'};
+const models={text:'gpt-6.1-sol',image:'seedream-5-0-lite-260128',video:'doubao-seedance-2-0-fast-filter-off'};
 const secret=()=>process.env.FG_ADCRAFT_SECRET||'';
 export function tokenContext(token,workspace){
   if(!secret()||typeof token!=='string')throw Error('FG 广告服务未授权');
@@ -231,7 +231,7 @@ export async function adcraftInternalRoute(req,res,{pool,web,publicOrigin,canvas
     const payload=await body(req);const mode=match[2]==='/v1/chat/completions'?'text':match[2]==='/images/generations'?'image':match[2]==='/contents/generations/tasks'?'video':null;if(!mode)throw Error('不支持的模型接口');
     const selected=await selectedAdvertisingModel(pool,mode,payload.model||models[mode]);const model=selected.billingId;payload.model=model;
     const mediaOperation=creatorMediaOperation(selected,payload,mode);
-    const channel=(await pool.query(`SELECT cm.channel_id,cm.protocol,c.api_format FROM channel_models cm JOIN model_channels c ON c.id=cm.channel_id WHERE c.name LIKE 'WeToken%' AND cm.model_key=$1 AND cm.enabled=true AND c.enabled=true AND cm.deleted_at IS NULL AND c.deleted_at IS NULL LIMIT 1`,[model])).rows[0];if(!channel)throw Error('FG 中未启用当前广告模型');
+    const channel=await companyModelChannel(pool,model);if(!channel)throw Error('FG 中未启用当前广告模型');
     const references={image:[],video:[],audio:[]};const env={web,publicOrigin};
     if(mode==='text'){
       for(const message of payload.messages||[])if(Array.isArray(message.content))for(const part of message.content)if(part.type==='image_url') { const ref=await importReference(part.image_url.url,'image',context,cookie,env);references.image.push(ref);part.image_url.url=ref.storageKey; }

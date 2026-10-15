@@ -42,26 +42,26 @@ type StyleProfileAsset struct {
 	Kind                 string                       `json:"kind"`
 	Provider             string                       `json:"provider"`
 	Title                string                       `json:"title"`
-	Enabled              *bool                        `json:"enabled"`
+	Enabled              *bool                        `json:"enabled,omitempty"`
 	SourceID             string                       `json:"sourceId"`
 	SourceURL            string                       `json:"sourceUrl"`
 	Model                string                       `json:"model"`
 	Version              string                       `json:"version"`
-	BaseModels           []string                     `json:"baseModels"`
-	TriggerWords         []string                     `json:"triggerWords"`
+	BaseModels           []string                     `json:"baseModels,omitempty"`
+	TriggerWords         []string                     `json:"triggerWords,omitempty"`
 	PromptFragment       string                       `json:"promptFragment"`
-	Weight               *float64                     `json:"weight"`
-	Parameters           *StyleProfileAssetParameters `json:"parameters"`
-	ReferenceURLs        []string                     `json:"referenceUrls"`
-	ReferenceResourceIDs []string                     `json:"referenceResourceIds"`
+	Weight               *float64                     `json:"weight,omitempty"`
+	Parameters           *StyleProfileAssetParameters `json:"parameters,omitempty"`
+	ReferenceURLs        []string                     `json:"referenceUrls,omitempty"`
+	ReferenceResourceIDs []string                     `json:"referenceResourceIds,omitempty"`
 	Status               string                       `json:"status"`
 	License              *StyleProfileAssetLicense    `json:"license,omitempty"`
 }
 
 type StyleProfileAssetParameters struct {
 	Sampler string   `json:"sampler"`
-	Steps   *int     `json:"steps"`
-	CFG     *float64 `json:"cfg"`
+	Steps   *int     `json:"steps,omitempty"`
+	CFG     *float64 `json:"cfg,omitempty"`
 	Size    string   `json:"size"`
 }
 

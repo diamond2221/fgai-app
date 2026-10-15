@@ -165,6 +165,10 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 	if err != nil {
 		return nil, err
 	}
+	config, err = s.personalGPTProvider(config, userID)
+	if err != nil {
+		return nil, err
+	}
 	input.Config = config
 	if input.Mode == "text" && input.Config.CapabilityConfig != nil && input.Config.CapabilityConfig.Text != nil {
 		// The same capability contract drives provider output limits, billing

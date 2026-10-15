@@ -85,13 +85,13 @@ test('administrator and former collaborator cannot open another owner advertisin
  assert.equal((await advertisingAccess(pool,{id:actor,reviewer:false},workspace)).owner_id,actor);
 });
 for(const [mode,path,payload] of [
- ['text','/v1/chat/completions',{model:'gpt-5.6-sol-t1a',messages:[{role:'user',content:'写广告脚本'}],max_tokens:100}],
+ ['text','/v1/chat/completions',{model:'claude-opus-5-5-t3a',messages:[{role:'user',content:'写广告脚本'}],max_tokens:100}],
  ['image','/images/generations',{prompt:'产品广告参考',size:'2048x2048'}],
  ['video','/contents/generations/tasks',{content:[{type:'text',text:'产品特写'}],duration:5,resolution:'480p',generate_audio:true}],
 ])test(mode+' uses FG queue, project attribution and NAS result without external model calls',async()=>{
  const f=fixture();const saved=global.fetch;global.fetch=f.nativeFetch;
  try{const result=await invoke(f,path,payload);assert.equal(result.status,200,JSON.stringify(result.response));assert.equal(f.submissions.length,1);const task=f.submissions[0];assert.equal(task.projectId,'fg-project');assert.equal(task.input.metadata.adcraftWorkspaceId,workspace);assert.equal(task.input.config.channelId,'company-wetoken');assert.ok([...f.jobs.values()][0].reserved_cny>0);
-  if(mode==='text'){assert.equal(result.response.choices[0].message.tool_calls[0].function.name,'write_script');assert.equal(task.input.agentRequests.chatCompletion.model,'gpt-5.6-sol-t1a');}
+  if(mode==='text'){assert.equal(result.response.choices[0].message.tool_calls[0].function.name,'write_script');assert.equal(task.input.agentRequests.chatCompletion.model,'claude-opus-5-5-t3a');}
   if(mode==='image')assert.equal(result.response.data[0].url,'http://mock-fg/api/public/resources/nas-image/file?signature=test');
   if(mode==='video'){assert.equal(task.input.config.videoGenerateAudio,'true');assert.equal(result.response.id,'test-task-1');}
   const repeat=await invoke(f,path,payload);assert.equal(repeat.status,200);assert.equal(f.submissions.length,1,'same operation cannot submit twice');

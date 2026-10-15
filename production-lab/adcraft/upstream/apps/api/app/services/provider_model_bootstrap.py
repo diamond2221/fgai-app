@@ -104,14 +104,14 @@ class ProviderModelBootstrapService:
             }
         import os
         if os.getenv('FG_ADCRAFT_SECRET'):
-            sonnet_ref = 'volcengine_ark:claude-sonnet-5-5-t3a'
+            sonnet_ref = 'volcengine_ark:gpt-6.1-sol'
             try:
                 sonnet = catalog.get_model(sonnet_ref)
             except ValueError:
                 sonnet = None
             if sonnet is not None and sonnet.availability == 'available':
                 for key in ('agent', 'text'):
-                    if existing.get(key) is not None and existing[key].model_ref == 'volcengine_ark:gpt-5.6-sol-t1a':
+                    if existing.get(key) is not None and existing[key].model_ref in ('volcengine_ark:gpt-5.6-sol-t1a', 'volcengine_ark:gpt-6-astra', 'volcengine_ark:claude-sonnet-5-5-t3a'):
                         migrated_defaults[key] = sonnet_ref
         default_updates = {**migrated_defaults, **valid_candidates}
         if default_updates:
@@ -124,7 +124,7 @@ class ProviderModelBootstrapService:
     def _recognized_defaults(self) -> dict[str, str]:
         import os
         if os.getenv('FG_ADCRAFT_SECRET'):
-            return {'agent': 'volcengine_ark:claude-sonnet-5-5-t3a', 'text': 'volcengine_ark:claude-sonnet-5-5-t3a', 'image': 'volcengine_ark:doubao-seedream-5-0-lite-260128', 'video': 'volcengine_ark:doubao-seedance-2-0-fast-260128'}
+            return {'agent': 'volcengine_ark:gpt-6.1-sol', 'text': 'volcengine_ark:gpt-6.1-sol', 'image': 'volcengine_ark:doubao-seedream-5-0-lite-260128', 'video': 'volcengine_ark:doubao-seedance-2-0-fast-260128'}
         text_ref = "fake:deterministic-text"
         if self._settings.agent_runtime_mode != "fake":
             text_ref = (

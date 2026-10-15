@@ -12,6 +12,7 @@ import (
 
 // RegisterLibraryRoutes 注册画布和短剧共用的个人资料库（画风、声音、角色），不受短剧功能开关限制。
 func RegisterLibraryRoutes(r *gin.RouterGroup, svc *service.Service) {
+	RegisterPersonalGPTRoutes(r, svc)
 	RegisterStyleProfileRoutes(r, svc)
 	r.GET("/voice-profiles", func(c *gin.Context) {
 		user, err := currentUser(c, svc)

@@ -5,10 +5,9 @@ import {context,integrated} from './fg-context.mjs';
 
 const SPECS = [
   // text
-  { id: 'claude-sonnet-5-5-t3a', label: 'Claude Sonnet 5.5', capability: 'text', protocol: 'openai', note: '默认主脑 · 剧本与导演提示词', default: true },
+  { id: 'gpt-6.1-sol', label: 'GPT6.1 Sol · Trings 个人 Key', capability: 'text', protocol: 'openai', note: '默认主脑 · high 思考 · 先在个人设置填写 Key', default: true },
+  { id: 'claude-sonnet-5-5-t3a', label: 'Claude Sonnet 5.5', capability: 'text', protocol: 'openai', note: '备选主脑' },
   { id: 'claude-opus-5-5-t3a', label: 'Claude Opus 5.5', capability: 'text', protocol: 'openai', note: '最强推理，较慢' },
-  { id: 'gpt-6-astra', label: 'GPT 6 Astra', capability: 'text', protocol: 'openai', note: '备选主脑' },
-  { id: 'gpt-5.6-sol-t1a', label: 'GPT 5.6 Sol', capability: 'text', protocol: 'openai', note: '备选主脑' },
   { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capability: 'text', protocol: 'openai', note: '中文长文本，不读图' },
   // image
   { id: 'gpt-image-2', label: 'GPT Image 2', capability: 'image', protocol: 'openai', default: true },
@@ -66,7 +65,7 @@ export const MODELS = SPECS.map((spec) => {
 export const getModels=()=>integrated?(context().models||[]):MODELS;
 export const byId = (id) => getModels().find((m) => m.id === id);
 export const defaultModel = (capability) => {
- const preferred={text:'claude-sonnet-5-5-t3a',image:'dola-seedream-5-0-pro-260628',video:'dreamina-seedance-2-5-filter-off'}[capability];
+ const preferred={text:'gpt-6.1-sol',image:'dola-seedream-5-0-pro-260628',video:'dreamina-seedance-2-5-filter-off'}[capability];
  const list=getModels();return list.find(m=>m.id===preferred)?.id||list.find(m=>m.capability===capability&&m.default)?.id;
 };
 

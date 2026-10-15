@@ -71,7 +71,7 @@ ArkVideoBackend.video_capabilities_for_model = staticmethod(company_video_capabi
 if not text or not images or not videos:
     raise RuntimeError('Company director models are not configured')
 
-openai_models = {m['billingId']: ModelInfo(display_name=m['name'], media_type='text', capabilities=['text_generation', 'structured_output', 'vision'], max_output_tokens=32768, default=m['billingId']=='claude-sonnet-5-5-t3a') for m in text}
+openai_models = {m['billingId']: ModelInfo(display_name=m['name'], media_type='text', capabilities=['text_generation', 'structured_output', 'vision'], max_output_tokens=32768, default=m['billingId']=='gpt-6.1-sol') for m in text}
 openai_models.update({m['billingId']: ModelInfo(display_name=m['name'], media_type='image', capabilities=['text_to_image', 'image_to_image'], default=m['billingId']=='seedream-5-0-lite-260128') for m in images})
 openai_models.update({m['billingId']: ModelInfo(display_name=m['name'], media_type='audio', capabilities=['text_to_speech', 'speech_speed'], default=m['billingId']=='seed-tts-2.0') for m in audio})
 from lib.backends.audio_backends.openai import OpenAIAudioBackend
@@ -132,12 +132,12 @@ async def configure():
                 existing[model['billingId']] = await agents.create(preset_id='custom', display_name=model['name'], base_url=base, api_key=capability, model=model['billingId'], haiku_model=model['billingId'], sonnet_model=model['billingId'], opus_model=model['billingId'], subagent_model=model['billingId'])
             else:
                 await agents.update(existing[model['billingId']].id, base_url=base, api_key=capability)
-        if await settings.get('fg_sonnet_default_v1212') != 'true':
-            default = existing.get('claude-sonnet-5-5-t3a') or next(iter(existing.values()))
+        if await settings.get('fg_sol_default_v1313') != 'true':
+            default = existing.get('gpt-6.1-sol') or next(iter(existing.values()))
             await agents.set_active(default.id)
-            await settings.set('fg_sonnet_default_v1212', 'true')
-            await settings.set('default_text_backend', 'openai/claude-sonnet-5-5-t3a')
-        defaults = {'default_text_backend': 'openai/claude-sonnet-5-5-t3a', 'default_image_backend': 'openai/seedream-5-0-lite-260128', 'default_video_backend': 'ark/'+next(k for k in video_models if 'fast' in k)}
+            await settings.set('fg_sol_default_v1313', 'true')
+            await settings.set('default_text_backend', 'openai/gpt-6.1-sol')
+        defaults = {'default_text_backend': 'openai/gpt-6.1-sol', 'default_image_backend': 'openai/seedream-5-0-lite-260128', 'default_video_backend': 'ark/'+next(k for k in video_models if 'fast' in k)}
         for key, value in defaults.items():
             if not await settings.get(key):
                 await settings.set(key, value)

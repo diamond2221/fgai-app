@@ -5,6 +5,7 @@ export type Skill = { id: string; key: string; stage: 'script' | 'style' | 'asse
 export type StylePreset = { id: string; source: 'overseas' | 'fg-library'; title: string; description: string; image: string; prompt: string; palette?: string[]; film?: string; tags?: string[]; category?: string };
 export type Direction = { id: string; name: string; tagline: string; enabled: boolean; defaults: Record<string, any> };
 export type Config = {
+  planningPrompts?: {brief:string;bible:string};
   actor?: {id: string; name: string}; budget?: {monthlyCny: number|null;usedCny:number;remainingCny:number|null;unknown:number};
   mode: 'mock' | 'live'; media: string; directions: Direction[]; models: Model[]; skills: Skill[]; styles: StylePreset[];
   dramaStages: { id: string; name: string }[]; episodeStages: { id: string; name: string }[];

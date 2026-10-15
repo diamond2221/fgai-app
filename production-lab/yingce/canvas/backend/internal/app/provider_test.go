@@ -2904,6 +2904,19 @@ func TestEquivalentStyleProfileJSONIgnoresObjectKeyOrder(t *testing.T) {
 	}
 }
 
+func TestCompanySolDefaultsToHighAcrossTextProtocols(t *testing.T) {
+	for _, wire := range []string{"chat-completion", "responses"} {
+		body := map[string]interface{}{}
+		applyTextThinking(body, canvasGenerationInput{Config: providerConfig{Model: "gpt-6.1-sol"}}, wire)
+		if wire == "chat-completion" && body["reasoning_effort"] != "high" {
+			t.Fatalf("chat effort: %#v", body)
+		}
+		if wire == "responses" && body["reasoning"].(map[string]interface{})["effort"] != "high" {
+			t.Fatalf("responses effort: %#v", body)
+		}
+	}
+}
+
 func TestAssetBatchFinalPromptRecordsEffectiveStyleAndStaticBoundaries(t *testing.T) {
 	profile := styleProfileDocument{SchemaVersion: 1, PresetID: "style-asset", Title: "项目画风", Source: "user", Revision: 3, Prompt: "真人恐怖电影，冷灰蓝，加州农舍，手持后退", ExecutionPolicy: "compatible-fallback", Assets: []styleProfileAsset{}}
 	input := canvasGenerationInput{

@@ -1,6 +1,7 @@
 import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {priceQuote} from './fg-quotes.mjs';
 import {estimateCNY} from './fg-prices.mjs';
+import {isCompanyText} from './fg-company-text.mjs';
 const microCny=value=>Math.ceil(Number(value)*1e6-1e-8);
 const volcSpeechModels=new Set(['seed-audio-1.0','seed-tts-2.0','volc.seedasr.auc','volc.speech.mt','volc.seedasr.sauc.duration']);
 // The company temporarily exempts these server-configured speech services from
@@ -10,6 +11,7 @@ const companyMusic=(model,snapshot)=>model==='suno-company-music'&&snapshot?.ena
 const capExemptAudio=(model,snapshot)=>capExemptSpeech(model,snapshot)||companyMusic(model,snapshot);
 
 export function admissionPrice(model,capability,payload,price,fx){
+ if(capability==='text'&&isCompanyText(model,price))return 0;
  if(!price?.enabled)return null;
  if(capability==='text'){
   // Reserve a conservative input bound and the declared output ceiling. No
@@ -83,7 +85,7 @@ export async function reserveBudget(pool,input){
   // The company subscription pays for Suno; members reserve no personal spend.
   const quoted=companyMusic(input.model,snapshot)?0:admissionPrice(input.model,input.capability,input.payload||{},snapshot,fx);
   const amount=quoted===null?null:quoted===0?0:microCny(quoted)/1e6;
-  if(!capExemptAudio(input.model,snapshot)){
+  if(!capExemptAudio(input.model,snapshot)&&!(input.capability==='text'&&isCompanyText(input.model,snapshot))){
    if((limit>0||budget>0)&&(!(amount>=0)||amount===null))throw Error('本模型规格暂不能确定费用上限，限额项目中暂停提交，请联系超级管理员');
    if(limit>0){const usage=await spendUsage(client,{userId:input.userId,since:monthStart(),excludeCapExemptAudio:true});if(usage.unknown||microCny(usage.used)+microCny(amount)>Math.round(limit*1e6))throw Error('本月费用额度不足或有金额待确认，请联系超级管理员调整限额');}
    if(budget>0){const usage=await spendUsage(client,{projectId,excludeCapExemptAudio:true});if(usage.unknown||microCny(usage.used)+microCny(amount)>Math.round(budget*1e6))throw Error('项目制作预算不足或有金额待确认，请联系超级管理员调整预算');}

@@ -3,6 +3,7 @@ import { useDirector } from '../lib/ctx';
 import { api, Inspiration } from '../api';
 import { extractPalette } from '../lib/files';
 import { Card, copyText, Go, Locked, UploadButton } from './Card';
+import PlanningEditor from './PlanningEditor';
 
 type Tab = 'overseas' | 'fg-library' | 'inspiration' | 'upload';
 
@@ -23,6 +24,7 @@ export default function BibleCard() {
       sub="全剧唯一的事实来源：画风、面孔、语言、表演。之后每一张资产图、每一段提示词都从这里取值。"
       footer={b.confirmed ? <Locked>圣经已锁定 · {st.title}</Locked> : <Go disabled={busy} onGo={(el) => run('bible.confirm', {}, { from: el })}>用「{st.title}」锁定圣经</Go>}
     >
+      <PlanningEditor kind="bible" />
       <div className="bible-head">
         <h3 className="film-title">{b.title}</h3>
         <p className="logline">{b.loglineZh}</p>

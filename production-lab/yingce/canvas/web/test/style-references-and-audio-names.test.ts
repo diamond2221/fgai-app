@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createStyleProfileSnapshot, styleReferenceResourceIds, withStyleReferenceResources, resolveStyleExecutionPlan } from "@/lib/canvas/style-profile";
+import { createStyleProfileSnapshot, parseStyleProfile, styleReferenceResourceIds, withStyleReferenceResources, resolveStyleExecutionPlan } from "@/lib/canvas/style-profile";
 import { canvasReferenceDisplayLabel, canvasResourceMentionToken } from "@/lib/canvas/canvas-resource-references";
 
 test("style references remain optional, unique and limited to six stored images", () => {
@@ -23,4 +23,14 @@ test("audio titles distinguish voices without changing stored node mention ident
     const token = canvasResourceMentionToken(ref);
     expect(canvasResourceMentionToken({ ...ref, title: "Shadow_柔和声音.wav" })).toBe(token);
     expect(canvasReferenceDisplayLabel({ ...ref, title: "" })).toBe("音频1");
+});
+
+test("saved reference styles survive legacy Go null optional fields", () => {
+    const profile = createStyleProfileSnapshot({ id: "saved", title: "带参考图", description: "", tags: [], prompt: "写实电影" });
+    const saved = { ...profile, assets: [{ id: "ref", kind: "reference", provider: "fg-resource", title: "画风参考 1", status: "validated", enabled: true, referenceResourceIds: ["image-1"], referenceUrls: null, baseModels: null, triggerWords: null, weight: null, parameters: null }] };
+    const restored = parseStyleProfile(JSON.stringify(saved));
+    expect(restored).not.toBeNull();
+    expect(styleReferenceResourceIds(restored)).toEqual(["image-1"]);
+    expect(resolveStyleExecutionPlan(restored!, { mode: "image", model: "gpt-image-2" }).status).toBe("ready");
+    expect(parseStyleProfile(JSON.stringify({ ...saved, assets: [{ ...saved.assets[0], weight: "invalid" }] }))).toBeNull();
 });

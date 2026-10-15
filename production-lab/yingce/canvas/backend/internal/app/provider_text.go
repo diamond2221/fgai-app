@@ -46,6 +46,7 @@ func executeProtocolCreateRequest(ctx context.Context, input canvasGenerationInp
 			field = "max_output_tokens"
 		}
 		applyTextOutputLimit(body, input.MaxOutputTokens, field)
+		applyTextThinking(body, input, wire)
 		spec.Body = body
 	}
 	if input.Mode != "text" || !input.StreamText || (wire != "chat-completion" && wire != "responses" && wire != "claude-api") {
@@ -166,14 +167,17 @@ func runClaudeTextTask(ctx context.Context, input canvasGenerationInput) (map[st
 }
 
 func applyTextThinking(body map[string]interface{}, input canvasGenerationInput, protocol string) {
-	if !input.TextOptions.Thinking {
+	effort := "medium"
+	if input.Config.Model == "gpt-6.1-sol" {
+		effort = "high"
+	} else if !input.TextOptions.Thinking {
 		return
 	}
 	switch protocol {
 	case "responses":
-		body["reasoning"] = map[string]interface{}{"effort": "medium", "summary": "auto"}
+		body["reasoning"] = map[string]interface{}{"effort": effort, "summary": "auto"}
 	case "chat-completion":
-		body["reasoning_effort"] = "medium"
+		body["reasoning_effort"] = effort
 	case "claude-api":
 		body["thinking"] = map[string]interface{}{"type": "enabled", "budget_tokens": 1024}
 	}

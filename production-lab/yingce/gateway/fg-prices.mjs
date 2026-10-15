@@ -1,4 +1,5 @@
 // Rate estimates are separate from fee reconciliation. Unknown usage, cache
+import {isCompanyText} from './fg-company-text.mjs';
 // pricing, modality or resolution must remain null, never a fabricated zero.
 // Observed Seedance receipts round positive charges up to 6 currency decimals.
 // This remains an estimate; only the provider receipt can settle the charge.
@@ -9,6 +10,7 @@ export function estimateCNY(call,price,fx){
     return rounded*fx;
 }
 export function estimateUSD(call,price){
+    if(isCompanyText(call.model,price))return 0;
     if(!price?.enabled||!Number.isFinite(price.discount)||call.status!=='succeeded'||call.task_status==='failed')return null;
     const discount=price.discount;
     let request,response;try{request=JSON.parse(call.request_body||'{}');response=JSON.parse(call.response_body||'{}');}catch{return null;}

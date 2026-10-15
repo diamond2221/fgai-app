@@ -23,6 +23,8 @@ export function capabilities(spec,{legacy=false}={}){
  if(spec.capability==='text'){
   // The transport ceiling is independent of the provider's token context.
   const models={
+   // Conservative application limits for the company NewAPI route; not advertised provider maxima.
+   'gpt-6.1-sol':[128000,32768,16],
    'claude-opus-5-5-t3a':[1000000,128000,600],
    'claude-sonnet-5-5-t3a':[1000000,128000,600],
    'deepseek-v4-pro':[1048576,393216,0],

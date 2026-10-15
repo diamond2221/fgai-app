@@ -184,7 +184,7 @@ export const defaultConfig: AiConfig = {
     model: "",
     imageModel: "",
     videoModel: "",
-    textModel: "claude-sonnet-5-5-t3a",
+    textModel: "gpt-6.1-sol",
     audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
@@ -434,14 +434,13 @@ export function normalizeConfigSnapshot(snapshot: ConfigStoreSnapshot | undefine
     const textModels = filterModelsByCapability(models, "text", channels);
     const audioModels = filterModelsByCapability(models, "audio", channels);
     const model = normalizeSelectedModel(config.model || config.imageModel || config.textModel, channels, models);
-    const sonnet = textModels.find((option) => modelOptionName(option) === "claude-sonnet-5-5-t3a");
+    const companyTextDefault = textModels.find((option) => modelOptionName(option) === "gpt-6.1-sol");
     const savedText = config.textModel;
-    const preferredText = sonnet && !config.fgTextDefaultRevision
-        ? sonnet : savedText || sonnet || model;
+    const preferredText = companyTextDefault && (config.fgTextDefaultRevision || 0) < 2 ? companyTextDefault : savedText || companyTextDefault || model;
     return {
         config: {
             ...config,
-            fgTextDefaultRevision: sonnet ? 1 : config.fgTextDefaultRevision,
+            fgTextDefaultRevision: companyTextDefault ? 2 : config.fgTextDefaultRevision,
             channelMode: "remote" as const,
             apiFormat: normalizeApiFormat(config.apiFormat),
             channels,

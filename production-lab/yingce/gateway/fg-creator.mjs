@@ -106,7 +106,7 @@ export async function creatorInternalRoute(req,res,{pool,web,publicOrigin,canvas
   const operationId=String(req.headers['x-fg-operation-id']||'');
   if(arc&&!uuid.test(operationId))throw Error('导演制作请求缺少操作标识；未提交模型任务');
   const mode=match[2].startsWith('images/')?'image':match[2]==='contents/generations/tasks'?'video':match[2]==='audio/speech'?'audio':'text';
-  let requested=payload.model||(mode==='image'?'gpt-image-2':mode==='video'?'doubao-seedance-2-0-fast-filter-off':'claude-sonnet-5-5-t3a');
+  let requested=payload.model||(mode==='image'?'gpt-image-2':mode==='video'?'doubao-seedance-2-0-fast-filter-off':'gpt-6.1-sol');
   if(arc&&mode==='video'){const alias=(await advertisingModels(pool)).find(m=>m.capability==='video'&&m.billingId.replace(/-filter-off$/,'').replace(/seedance-2-0/,'seedance-2.0')===requested);if(alias)requested=alias.billingId;}
   const selected=await selectedAdvertisingModel(pool,mode,requested),model=selected.billingId;
   const adWorkspace=payload.fgAdWorkspaceId?await advertisingAccess(pool,{...actor,reviewer:actor.platform_role==='superadmin'},payload.fgAdWorkspaceId):null;
@@ -123,7 +123,7 @@ export async function creatorInternalRoute(req,res,{pool,web,publicOrigin,canvas
    if(mode==='image')for(const value of [payload.image||[]].flat())if(value)references.image.push(await creatorReference(value,'image',api,{web,cookie,publicOrigin}));
    if(mode==='video')for(const part of payload.content||[])for(const kind of Object.keys(references))if(part.type===kind+'_url'){const ref=await creatorReference(part[kind+'_url']?.url,kind,api,{web,cookie,publicOrigin});if(part.role)ref.role=part.role;references[kind].push(ref);}
   }
-  const channel=(await pool.query(`SELECT cm.channel_id,cm.protocol,c.api_format FROM channel_models cm JOIN model_channels c ON c.id=cm.channel_id WHERE (c.name LIKE 'WeToken%' OR c.name IN ('火山语音 · FG','Suno 音乐 · FG')) AND cm.model_key=$1 AND cm.enabled AND c.enabled AND cm.deleted_at IS NULL AND c.deleted_at IS NULL LIMIT 1`,[model])).rows[0];if(!channel)throw Error('公司模型暂不可用');
+  const channel=(await pool.query(`SELECT cm.channel_id,cm.protocol,c.api_format FROM channel_models cm JOIN model_channels c ON c.id=cm.channel_id WHERE (c.name LIKE 'WeToken%' OR c.name IN ('Trings · 个人 GPT','火山语音 · FG','Suno 音乐 · FG')) AND cm.model_key=$1 AND cm.enabled AND c.enabled AND cm.deleted_at IS NULL AND c.deleted_at IS NULL LIMIT 1`,[model])).rows[0];if(!channel)throw Error('公司模型暂不可用');
   // PostgreSQL serialises initial project mapping and duplicate transport retries.
   const client=await pool.connect();let workspace,job,newJob=false;
   const logical=createHash('sha256').update(JSON.stringify([arc?'arcreel':'creator',operationId||req.headers['session_id']||req.headers['x-codex-session-id']||'',payload])).digest('hex');
@@ -208,7 +208,7 @@ export async function creatorUserRoute(req,res,{pool,actor,path}){
  const isStatic=path.pathname==='/creator-app'||path.pathname.startsWith('/creator-static/')||path.pathname.startsWith('/creator-presets/')||path.pathname.startsWith('/fonts/opencreator/')||/^\/(?:dashboard|platforms|site-icons|skill-market|auth)\/.+\.(?:png|jpe?g|webp|svg|mp4)$/.test(path.pathname);
  if(!isRuntime&&!isStatic)return false;
  if(isRuntime&&path.pathname==='/.opencreator/runtime/codex/models'){
-  const models=(await advertisingModels(pool)).filter(m=>m.capability==='text').map(m=>({id:m.billingId,model:m.billingId,displayName:m.name,description:'公司 WeToken 渠道 · 纳入 FG 人民币账单和月额度',supportedReasoningEfforts:[],defaultReasoningEffort:null,inputModalities:['text','image'],isDefault:m.billingId==='claude-sonnet-5-5-t3a'}));json(res,{models});return true;
+  const models=(await advertisingModels(pool)).filter(m=>m.capability==='text').map(m=>({id:m.billingId,model:m.billingId,displayName:m.name,description:m.billingId==='gpt-6.1-sol'?'Trings 个人 Key · FG 不扣额度 · high 思考':'公司 WeToken 渠道 · 纳入 FG 人民币账单和月额度',supportedReasoningEfforts:m.billingId==='gpt-6.1-sol'?['high']:[],defaultReasoningEffort:m.billingId==='gpt-6.1-sol'?'high':null,inputModalities:['text','image'],isDefault:m.billingId==='gpt-6.1-sol'}));json(res,{models});return true;
  }
  const inner=isRuntime?path.pathname.slice('/.opencreator/runtime'.length):'';
  if(isRuntime&&((/^\/codex\/(?:provider|login|logout)/.test(inner)&&!['GET','HEAD'].includes(req.method))||(/^\/(?:settings\/storage|creator-services\/config|config)/.test(inner)&&!['GET','HEAD'].includes(req.method)))){json(res,{error:{code:'FG_MANAGED_PROVIDER',message:'模型与存储由公司统一管理，无需个人 Codex 账号'}},403);return true;}

@@ -27,3 +27,15 @@ export function parseJson(text) {
   if (start < 0 || end < start) throw new Error('模型没有返回可解析的 JSON');
   return JSON.parse(raw.slice(start, end + 1));
 }
+
+// A conversational suggestion without actions is valid. Never infer writes from prose.
+export function parseDirectorTurn(text) {
+  try {
+    const result = parseJson(text);
+    if (!result || Array.isArray(result) || typeof result.reply !== 'string' || (result.actions !== undefined && !Array.isArray(result.actions))) throw Error('导演响应结构无效');
+    return {...result, actions: result.actions || []};
+  } catch (error) {
+    if (typeof text === 'string' && text.trim() && !/[\[{}\]]|```/.test(text)) return {reply:text.trim(),actions:[]};
+    throw error;
+  }
+}

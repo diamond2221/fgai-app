@@ -1,7 +1,7 @@
 import http from 'node:http';
 import {pipeline} from 'node:stream';
 import {createHmac,createHash,timingSafeEqual} from 'node:crypto';
-import {advertisingModels,selectedAdvertisingModel} from './fg-adcraft-models.mjs';
+import {advertisingModels,selectedAdvertisingModel,companyModelChannel} from './fg-adcraft-models.mjs';
 import {creatorGenerationConfig,creatorMediaOperation} from './fg-creator-config.mjs';
 import {priceQuote} from './fg-quotes.mjs';
 import {monthStart,spendUsage} from './fg-budgets.mjs';
@@ -147,7 +147,7 @@ export async function meilinInternalRoute(req,res,ctx){
    let sending=false;
    try{
    const references={image:[],video:[],audio:[]};for(const ref of refs)references[ref.kind].push(await uploadReference(ref,owner,ctx,projectId,drama));
-   const channel=(await ctx.pool.query(`SELECT cm.channel_id id,cm.protocol,c.api_format FROM channel_models cm JOIN model_channels c ON c.id=cm.channel_id WHERE c.name LIKE 'WeToken%' AND cm.model_key=$1 AND cm.enabled AND c.enabled AND cm.deleted_at IS NULL AND c.deleted_at IS NULL LIMIT 1`,[selected.billingId])).rows[0];if(!channel)throw Error('公司模型暂不可用');
+   const channel=await companyModelChannel(ctx.pool,selected.billingId);if(!channel)throw Error('公司模型暂不可用');
    sending=true;const task=await owner.api('/tasks','POST',{projectId,...meilinTaskInput(selected,channel,{...input,payload:{...payload,operation}},drama,references)});link.task_id=task.id;
    }catch(error){if(!sending||(error.status>=400&&error.status<500))await ctx.pool.query('DELETE FROM fg_meilin_calls WHERE operation_id=$1 AND task_id IS NULL',[input.operationId]);throw error;}
   }

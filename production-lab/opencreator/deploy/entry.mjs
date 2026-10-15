@@ -43,12 +43,12 @@ const {readOpenCreatorConfig,updateOpenCreatorConfig}=await import('/app/package
 // The native config package normalizes legacy camelCase and canonical snake_case
 // TOML keys. Writing raw camelCase left an older creator_services table active.
 const document=readOpenCreatorConfig('/state/opencreator/config.toml').document;
-const defaultsMarker='/state/opencreator/fg-defaults-v1212';
+const defaultsMarker='/state/opencreator/fg-defaults-sol-v1313';
 let initialized=false;
 try{await fs.access(defaultsMarker);initialized=true;}catch(error){if(error.code!=='ENOENT')throw error;}
 const textModel=managedTextDefault(document,catalog,initialized);
 const config=`model = "${textModel}"\nmodel_provider = "fg"\nmodel_catalog_json = "/state/codex/models.json"\nweb_search = "disabled"\n[features]\nmulti_agent = false\nmulti_agent_v1 = false\n[model_providers.fg]\nname = "FG WeToken"\nbase_url = "http://fg-gateway:3010/internal/creator/${actor}/v1"\nenv_key = "FG_CREATOR_CAPABILITY"\nwire_api = "responses"\nrequires_openai_auth = false\nsupports_websockets = false\n`;
-await fs.writeFile('/state/codex/config.toml',config,{mode:0o600});
+await fs.writeFile('/state/codex/config.toml',(textModel==='gpt-6.1-sol'?'model_reasoning_effort = "high"\n':'')+config,{mode:0o600});
 const services={...createDefaultCreatorServicesConfig(),...document.creatorServices};
 // Docker is the external boundary: only this user's NAS directory and private
 // state volume are mounted, all Linux capabilities and privilege escalation

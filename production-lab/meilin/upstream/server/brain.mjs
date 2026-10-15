@@ -9,7 +9,8 @@ import * as SK from './skills.mjs';
 import * as ST from './styles.mjs';
 import { FILES_DIR } from './files.mjs';
 import { canReallyGenerate } from './media.mjs';
-import { chat, parseJson, liveText } from './llm.mjs';
+import { chat, parseJson, parseDirectorTurn, liveText } from './llm.mjs';
+import {editBrief,editBible,planningInput} from './planning.mjs';
 import { renderSegment, lockText, checkContinuity } from './fgformat.mjs';
 import * as S from './mock-story.mjs';
 
@@ -77,6 +78,7 @@ const memoryText = (d) => (d.memory || []).map((m) => `- ${m.kind === 'fact' ? '
 export const AUDIO_RULE = '成片声音：视频只随片生成音效、对白和旁白，不带背景音乐、不带字幕；BGM 和字幕都在后期加';
 export function migrate(d) {
   d.memory ||= [];
+  if(defaultModel('text')==='gpt-6.1-sol'&&(d.settings.textDefaultRevision||0)<2){d.settings.textModel='gpt-6.1-sol';d.settings.textDefaultRevision=2;}
   for(const a of d.assets?.items||[])a.id ||= randomUUID();
   if (!d.memory.some((m) => m.kind === 'rule' && m.ruleId === 'audio')) d.memory.unshift({ id: randomUUID().slice(0, 8), text: AUDIO_RULE, kind: 'rule', ruleId: 'audio', source: 'system', at: d.createdAt || iso() });
   const def = SK.defaults();
@@ -190,7 +192,7 @@ async function liveBrief(d, idea) {
 }
 async function liveBible(d) {
   const ids = ST.OVERSEAS.map((s) => `${s.id}=${s.title}`).join('，');
-  return liveJSON(d, `你是海外短剧剧集圣经编辑。字段：title, titleZh, logline, loglineZh, styleId（从 ${ids} 选一个）, faces, performance, rules(4 条), cast（4–6 个主要角色 {code:"@角色N", key, name, zh, age, look, role}；key 依次 A B D E F G H，跳过 C，C 留给摄影机）。演员面孔按目标市场。`, ctxJSON(d));
+  return liveJSON(d, `你是海外短剧剧集圣经编辑。字段：title, titleZh, logline, loglineZh, styleId（从 ${ids} 选一个）, faces, performance, rules(4 条), cast（4–6 个主要角色 {code:"@角色N", key, name, zh, age, look, role}；key 依次 A B D E F G H，跳过 C，C 留给摄影机）。演员面孔按目标市场。除英文片名 title、英文梗概 logline、角色原名 name 和代号 key 外，所有管理说明必须用中文：尤其 faces、performance、rules、age、look、role。中文说明不能改变原定族裔、市场或英文对白要求。`, ctxJSON(d));
 }
 async function liveScript(d, n) {
   const id = d.settings.skills.script;
@@ -445,6 +447,26 @@ async function actCore(d, type, payload = {}, ctx = {}) {
     }
 
     // ----- drama: brief -----
+    case 'brief.update': case 'brief.import': {
+      const next=editBrief(d,planningInput(payload));d.brief=next;d.settings.episodeSeconds=next.episodeSeconds;d.stage='brief';
+      remember(d,`立项：${next.premiseZh}（${next.episodes}集×${next.episodeSeconds}秒，待重新确认）`);
+      return r('立项草稿已保存。请核对后重新确认；已有剧本和资产保留，不自动重生成。',{stage:'brief'});
+    }
+    case 'bible.update': case 'bible.import': {
+      if(!d.brief)throw Error('请先填写立项');
+      d.bible=editBible(d,planningInput(payload));d.bible.style ||= ST.styleFromPreset(ST.OVERSEAS[0]);d.title=d.bible.title;d.titleZh=d.bible.titleZh;d.stage='bible';
+      for(const e of d.episodes)for(const s of e.segments||[])s.stale=true;
+      remember(d,`圣经：${d.titleZh}，已修改，待重新确认。已有产物保留。`);
+      return r('圣经与画风草稿已保存，请重新确认。已有图片和视频保留，后续生成使用新设定。',{stage:'bible'});
+    }
+    case 'bible.translate': {
+      if(!d.bible)throw Error('请先创建圣经');
+      const translated=await liveJSON(d,'你是影视制片翻译。把 faces、performance、rules 和 cast 中的 age、look、role 翻译成准确中文。保留所有事实、族裔、年龄、姓名、片名、code、key和style，不增删人物。只返回输入对象的中文说明版 JSON。',JSON.stringify(d.bible));
+      const original=d.bible,confirmed=original.confirmed;
+      const translatedCast=original.cast.map(c=>{const v=translated.cast?.find(x=>x.code===c.code)||{};return {...c,look:v.look||c.look,role:v.role||c.role,age:typeof c.age==='number'?c.age:v.age||c.age};});
+      d.bible={...editBible(d,{faces:translated.faces||original.faces,performance:translated.performance||original.performance,rules:translated.rules||original.rules,cast:translatedCast}),style:original.style,confirmed};
+      return r('演员、表演与红线说明已翻译为中文；人物身份及成片语言未改变。',{stage:'bible'});
+    }
     case 'brief.submit': {
       const idea = String(payload.idea || '').trim();
       d.brief = live ? { ...(await liveBrief(d, idea)), idea } : { ...structuredClone(S.SAMPLE_BRIEF), idea: idea || S.SAMPLE_BRIEF.premiseZh, sample: true };
@@ -482,7 +504,7 @@ async function actCore(d, type, payload = {}, ctx = {}) {
       d.brief.confirmed = true;
       remember(d, `立项：${d.brief.premiseZh}（${d.brief.genre}，${d.brief.market}，${d.brief.episodes} 集 × ${d.brief.episodeSeconds} 秒）`);
       for (const q of (d.brief.questions || []).filter((x) => x.id !== 'length')) remember(d, `${q.q.replace(/[？?]$/, '')}：${q.options[q.pick]}`);
-      const b = live ? await liveBible(d) : structuredClone(S.SAMPLE_BIBLE);
+      const b = payload.manual ? {title:d.title||'',titleZh:d.titleZh||'未命名剧集',loglineZh:d.brief.premiseZh,faces:'',performance:'',rules:[],cast:[]} : live ? await liveBible(d) : structuredClone(S.SAMPLE_BIBLE);
       const preset = ST.findPreset(b.styleId) || ST.OVERSEAS[0];
       d.bible = { ...b, style: ST.styleFromPreset(preset), confirmed: false };
       d.title = d.bible.title; d.titleZh = d.bible.titleZh;
@@ -1061,10 +1083,10 @@ ${memoryText(d) || '（暂无）'}
 ${actionsDoc()}
 只输出 JSON：{"reply":"给成员的话","actions":[{"type":"动作名","payload":{}}]}。成员意图明确才给 actions，可以连续多个（例如先换模型再出图）。`,
     messages: d.messages.slice(-30).map((m) => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.text })),
-    maxTokens: 1200,
+    maxTokens: 8000,
     temperature: 0.3,
   });
-  const j = parseJson(out);
+  const j = parseDirectorTurn(out);
   let last = { reply: '' };
   for (const a of (j.actions || []).slice(0, 4)) last = await act(d, a.type, a.payload || {}, ctx);
   if (!last.reply && j.reply) say(d, j.reply);

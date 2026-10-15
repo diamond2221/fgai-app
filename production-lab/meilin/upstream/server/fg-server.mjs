@@ -14,6 +14,7 @@ import * as skills from './skills.mjs';
 import * as styles from './styles.mjs';
 import * as presets from './presets.mjs';
 import * as production from './fg-production.mjs';
+import {planningPrompts} from './planning.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url)),dist=join(root,'web/dist');
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.mp4':'video/mp4','.mp3':'audio/mpeg','.wav':'audio/wav','.woff2':'font/woff2'};
@@ -50,7 +51,7 @@ export function createMeilinServer(){return createServer(async(req,res)=>{
  let actor;try{actor=readIdentity(req.headers,req.method,req.url,process.env.MEILIN_INTERNAL_SECRET);}catch{return send(res,403,{error:'请从 FG 登录入口访问美林'});}
  const url=new URL(req.url,'http://meilin'),path=url.pathname,match=/^\/api\/dramas\/([a-f0-9-]{36})(?:\/(\w+))?$/.exec(path),dramaId=match?.[1]||'00000000-0000-4000-a000-000000000000';
  await runContext({actor,dramaId,operationId:req.headers['x-fg-operation-id'],textOrdinal:0},async()=>{try{
-  if(path==='/api/config'){const result=await catalog();return send(res,200,{mode:'live',media:'fg-tasks',directions:presets.DIRECTIONS,models:models.publicCatalog(),skills:skills.catalog(),styles:styles.allPresets(),dramaStages:[{id:'brief',name:'立项'},{id:'bible',name:'圣经与画风'}],episodeStages:[{id:'script',name:'剧本'},{id:'cast',name:'本集资产'},{id:'segments',name:'分段提示词'},{id:'shoot',name:'拍摄'},{id:'post',name:'后期'}],aiStudio:aiStudio(),inspirations:false,budget:result.budget,actor});}
+  if(path==='/api/config'){const result=await catalog();return send(res,200,{mode:'live',media:'fg-tasks',directions:presets.DIRECTIONS,models:models.publicCatalog(),skills:skills.catalog(),styles:styles.allPresets(),dramaStages:[{id:'brief',name:'立项'},{id:'bible',name:'圣经与画风'}],episodeStages:[{id:'script',name:'剧本'},{id:'cast',name:'本集资产'},{id:'segments',name:'分段提示词'},{id:'shoot',name:'拍摄'},{id:'post',name:'后期'}],aiStudio:aiStudio(),planningPrompts,inspirations:false,budget:result.budget,actor});}
   if(path==='/api/dramas'&&req.method==='GET')return send(res,200,production.documentView(await store.list()));
   if(path==='/api/dramas'&&req.method==='POST'){
    const operationId=context().operationId;if(!uuid.test(operationId||''))return send(res,400,{error:'创建请求缺少操作编号'});
@@ -59,7 +60,7 @@ export function createMeilinServer(){return createServer(async(req,res)=>{
    const input=await body(req),d=brain.createDrama(input.direction);d.id=operationId;context().dramaId=d.id;await store.save(d);return send(res,200,view(d));
   }
   if(match){const [,id,sub]=match;
-   if(!sub&&req.method==='GET'){const d=await store.get(id);return d?send(res,200,view(d)):send(res,404,{error:'剧目不存在'});}
+   if(!sub&&req.method==='GET'){await catalog();const d=await store.get(id);if(d)brain.migrate(d);return d?send(res,200,view(d)):send(res,404,{error:'剧目不存在'});}
    if(!sub&&req.method==='DELETE'){await store.remove(id);return send(res,200,{ok:true});}
    if(sub==='costs'&&req.method==='GET')return send(res,200,await bridge('costs'));
    if(sub==='members'){const input=req.method==='GET'?undefined:await body(req);return send(res,200,await db.members(id,input));}

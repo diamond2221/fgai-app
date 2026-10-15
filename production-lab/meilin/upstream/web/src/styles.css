@@ -918,3 +918,8 @@ a { color: var(--signal); }
 .cost-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
 .cost-table th,.cost-table td { padding: 12px; border-bottom: 1px solid var(--line, #dbe0e6); }
 .reel-video { width: 100%; height: 100%; object-fit: contain; }
+.planning-editor { padding: 16px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 12px; }
+.planning-editor details { margin-top: 16px; }
+.planning-editor form,.planning-editor fieldset { margin-block: 16px; }
+.planning-field { display: grid; gap: 6px; margin-block: 12px; }
+.planning-editor textarea { width: 100%; resize: vertical; }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useDirector } from '../lib/ctx';
 import { Card, Go, Locked } from './Card';
+import PlanningEditor from './PlanningEditor';
 
 const SPARKS = [
   ['婚礼当场被抛弃的新娘，反手亮出收购书', '豪门逆袭'],
@@ -66,6 +67,7 @@ export default function BriefCard() {
   if (!b) {
     return (
       <Card kicker="立项" title="说一句你想拍的故事" sub="在下方对美林说，或者用麦克风。没想好就挑一个，美林按北美爆款结构帮你展开。">
+        <PlanningEditor kind="brief" />
         <div className="sparks">
           {SPARKS.map(([s, tag], i) => (
             <button key={s} className="spark-card glow" disabled={busy} onClick={() => send(s)} style={{ animationDelay: `${i * 80}ms` }}>
@@ -85,6 +87,8 @@ export default function BriefCard() {
       sub={b.sample ? '模拟模式：用示例剧演示整条流程。配置 WeToken 后按你的想法实时生成。' : '只问会改变结构的问题，其余用方向默认值。每个问题都可以自己写答案。'}
       footer={b.confirmed ? <Locked>立项已锁定</Locked> : <Go disabled={busy} onGo={(el) => run('brief.confirm', {}, { from: el })}>锁定立项，起草剧集圣经</Go>}
     >
+      <PlanningEditor kind="brief" />
+      {!b.confirmed&&<button className="btn ghost small" disabled={busy} onClick={()=>run('brief.confirm',{manual:true})}>仅确认立项，手动或从 AI Studio 导入圣经</button>}
       <p className="premise-zh">{b.premiseZh}</p>
       <p className="premise-en">{b.premise}</p>
       <dl className="facts">

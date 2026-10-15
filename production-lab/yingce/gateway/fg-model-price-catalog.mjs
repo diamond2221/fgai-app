@@ -1,12 +1,13 @@
 import {capabilities} from './fg-model-capabilities.mjs';
 import {priceQuote} from './fg-quotes.mjs';
 import {speechModels,speechUtilities} from './fg-speech-provider.mjs';
+import {companyTextSpec,isCompanyText} from './fg-company-text.mjs';
 
 const companyAudio=[...speechModels,...speechUtilities,{id:'suno-company-music',capability:'audio',profile:{version:1}}];
 
 export function modelPriceRows(prices,specs,evidence,fx){
  return prices.map(p=>{
-  const spec=specs.find(s=>s.id===p.model);
+  const spec=isCompanyText(p.model,p.snapshot)?companyTextSpec:specs.find(s=>s.id===p.model);
   const audio=companyAudio.find(s=>s.id===p.model);
   const capability=spec?.capability||audio?.capability||'unknown';
   // Speech and music are configured outside the WeToken model-specs catalog.

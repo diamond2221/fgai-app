@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"yingce/backend/internal/model"
@@ -10,6 +11,35 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestReferenceStyleOmitsUnsetOptionalFields(t *testing.T) {
+	svc := newStyleProfileTestService(t)
+	request := styleProfileTestRequest(t, "带参考图风格", 1)
+	var doc StyleProfileDocument
+	if err := json.Unmarshal([]byte(request.ProfileJSON), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc.Assets = []StyleProfileAsset{{ID: "reference-1", Kind: "reference", Provider: "fg-resource", Title: "画风参考 1", Status: "validated", ReferenceResourceIDs: []string{"image-1"}}}
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := svc.CreateStyleProfile("user-1", StyleProfileRequest{ProfileJSON: string(encoded)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"enabled", "weight", "parameters", "baseModels", "triggerWords", "referenceUrls"} {
+		if strings.Contains(created.ProfileJSON, `"`+key+`":null`) {
+			t.Fatalf("optional %s breaks browser round-trip: %s", key, created.ProfileJSON)
+		}
+	}
+	if !strings.Contains(created.ProfileJSON, `"referenceResourceIds":["image-1"]`) {
+		t.Fatal("lost reference image")
+	}
+	if _, err := svc.UpdateStyleProfile("user-1", created.ID, StyleProfileRequest{ProfileJSON: created.ProfileJSON}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestStyleProfileCreateAndUpdateOwnsIdentityAndRevision(t *testing.T) {
 	svc := newStyleProfileTestService(t)
