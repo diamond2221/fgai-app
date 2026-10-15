@@ -5,12 +5,15 @@ import { calculateNodeAlignment, createNodeAlignmentContext, sameStringSet, type
 import { applyFrameDrop, buildCanvasFrameDropIndex, findFrameDropTargetFromIndex, getFrameChildIds, isFrameNode } from "@/lib/canvas/canvas-frame";
 import { applyCanvasSelectionStrategy, canvasSelectionHitsBounds, createCanvasSelectionBounds, createCanvasSelectionSpatialIndexCache, resolveCanvasSelectionHitMode, resolveCanvasSelectionPreviewDelta, resolveCanvasSelectionStrategy } from "@/lib/canvas/canvas-selection";
 import { canvasNodeBounds } from "@/lib/canvas/canvas-spatial-index";
+import { canvasEdgePanVelocity } from "@/lib/canvas/canvas-edge-pan";
 import type { CanvasNodeData, Position, SelectionBox, ViewportTransform } from "@/types/canvas";
 
 type UseCanvasSelectionControllerOptions = {
     containerRef: RefObject<HTMLDivElement | null>;
     nodesRef: { current: CanvasNodeData[] };
     viewportRef: { current: ViewportTransform };
+    previewViewport: (viewport: ViewportTransform) => void;
+    commitViewport: (viewport: ViewportTransform) => void;
     selectedNodeIdsRef: { current: Set<string> };
     historyPausedRef: { current: boolean };
     screenToCanvas: (clientX: number, clientY: number) => Position;
@@ -34,6 +37,7 @@ type DragState = {
     openPanelOnClick: boolean;
     startX: number;
     startY: number;
+    startWorld: Position;
     draggedNodeIds: string[];
     draggedRenderNodeIds: string[];
     draggedRenderNodeIdSet: Set<string>;
@@ -50,6 +54,7 @@ const EMPTY_DRAG_STATE: DragState = {
     openPanelOnClick: true,
     startX: 0,
     startY: 0,
+    startWorld: { x: 0, y: 0 },
     draggedNodeIds: [],
     draggedRenderNodeIds: [],
     draggedRenderNodeIdSet: new Set(),
@@ -60,6 +65,8 @@ export function useCanvasSelectionController({
     containerRef,
     nodesRef,
     viewportRef,
+    previewViewport,
+    commitViewport,
     selectedNodeIdsRef,
     historyPausedRef,
     screenToCanvas,
@@ -77,6 +84,9 @@ export function useCanvasSelectionController({
     onDeselect,
 }: UseCanvasSelectionControllerOptions) {
     const dragFrameRef = useRef<number | null>(null);
+    const edgePanFrameRef = useRef<number | null>(null);
+    const dragPointerRef = useRef<Position>({ x: 0, y: 0 });
+    const edgePannedRef = useRef(false);
     const pendingNodeDragRef = useRef<Position>({ x: 0, y: 0 });
     const pendingAlignmentGuidesRef = useRef<{ vertical?: number; horizontal?: number }>({});
     const alignmentContextRef = useRef<NodeAlignmentContext | null>(null);
@@ -201,7 +211,8 @@ export function useCanvasSelectionController({
         draggedNodesRef.current = currentNodes.filter((node) => dragIds.has(node.id) && !node.metadata?.locked);
         const draggedRenderNodeIds = initialSelectedNodes.map((item) => item.id);
         const draggedRenderNodeIdSet = new Set(draggedRenderNodeIds);
-        dragRef.current = { isDraggingNode: true, hasMoved: false, openPanelOnClick: !isMultiSelectClick, startX: event.clientX, startY: event.clientY, draggedNodeIds, draggedRenderNodeIds, draggedRenderNodeIdSet, initialSelectedNodes };
+        dragRef.current = { isDraggingNode: true, hasMoved: false, openPanelOnClick: !isMultiSelectClick, startX: event.clientX, startY: event.clientY, startWorld: screenToCanvas(event.clientX, event.clientY), draggedNodeIds, draggedRenderNodeIds, draggedRenderNodeIdSet, initialSelectedNodes };
+        edgePannedRef.current = false;
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         pendingNodeDragRef.current = { x: 0, y: 0 };
@@ -211,9 +222,11 @@ export function useCanvasSelectionController({
         setAlignmentGuides({});
         setDragPreview({ x: 0, y: 0, nodeIds: draggedRenderNodeIdSet });
         applyCanvasNodeDragPreview(containerRef.current, { x: 0, y: 0, nodeIds: draggedRenderNodeIdSet });
-    }, [containerRef, historyPausedRef, nodesRef, onBatchConnectionTarget, onNodeBringToFront, onNodeClick, onNodeInteractionStart, selectedNodeIdsRef, setSelectedConnectionId, setSelectedNodeIds]);
+    }, [containerRef, historyPausedRef, nodesRef, onBatchConnectionTarget, onNodeBringToFront, onNodeClick, onNodeInteractionStart, selectedNodeIdsRef, setSelectedConnectionId, setSelectedNodeIds, screenToCanvas]);
 
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
+        if (edgePanFrameRef.current !== null) cancelAnimationFrame(edgePanFrameRef.current);
+        edgePanFrameRef.current = null;
         if (dragFrameRef.current) {
             cancelAnimationFrame(dragFrameRef.current);
             dragFrameRef.current = null;
@@ -223,7 +236,8 @@ export function useCanvasSelectionController({
         const wasClick = shouldOpenPanelOnClick && !dragRef.current.hasMoved && dragRef.current.draggedNodeIds.length === 1;
         const clickedNodeId = dragRef.current.draggedNodeIds[0];
         const currentViewport = viewportRef.current;
-        const rawOffset = { x: clientX == null ? 0 : (clientX - dragRef.current.startX) / currentViewport.k, y: clientY == null ? 0 : (clientY - dragRef.current.startY) / currentViewport.k };
+        const world = screenToCanvas(clientX ?? dragPointerRef.current.x, clientY ?? dragPointerRef.current.y);
+        const rawOffset = { x: world.x - dragRef.current.startWorld.x, y: world.y - dragRef.current.startWorld.y };
         const initialPositions = dragRef.current.initialSelectedNodes;
         const initialById = new Map(initialPositions.map((item) => [item.id, item]));
         const { x: dx, y: dy } = calculateNodeAlignment(alignmentContextRef.current, rawOffset, 7 / currentViewport.k).offset;
@@ -236,7 +250,7 @@ export function useCanvasSelectionController({
         setAlignmentGuides({});
         if (dragRef.current.hasMoved) {
             const draggedNodeIds = new Set(dragRef.current.draggedNodeIds);
-            const positioned = clientX == null || clientY == null ? nodesRef.current : nodesRef.current.map((node) => {
+            const positioned = nodesRef.current.map((node) => {
                 const initial = initialById.get(node.id);
                 return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
             });
@@ -252,17 +266,41 @@ export function useCanvasSelectionController({
         alignmentContextRef.current = null;
         draggedNodesRef.current = [];
         dragRef.current = { ...EMPTY_DRAG_STATE };
+        if (edgePannedRef.current) commitViewport(viewportRef.current);
+        edgePannedRef.current = false;
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
             if (clickedNode) onNodeClick(clickedNode);
         }
-    }, [historyPausedRef, nodesRef, onLinkedFolderDrop, onNodeClick, onNodeDragEnd, setNodes, viewportRef]);
+    }, [historyPausedRef, nodesRef, onLinkedFolderDrop, onNodeClick, onNodeDragEnd, setNodes, viewportRef, screenToCanvas, commitViewport]);
 
-    const handleNodeDragMove = useCallback((event: MouseEvent | PointerEvent) => {
+    const handleNodeDragMove = useCallback((event: Pick<MouseEvent, "clientX" | "clientY">) => {
         if (!dragRef.current.isDraggingNode) return;
-        const currentViewport = viewportRef.current;
-        pendingNodeDragRef.current = { x: (event.clientX - dragRef.current.startX) / currentViewport.k, y: (event.clientY - dragRef.current.startY) / currentViewport.k };
+        dragPointerRef.current = { x: event.clientX, y: event.clientY };
+        const world = screenToCanvas(event.clientX, event.clientY);
+        pendingNodeDragRef.current = { x: world.x - dragRef.current.startWorld.x, y: world.y - dragRef.current.startWorld.y };
         if (Math.abs(event.clientX - dragRef.current.startX) > 3 || Math.abs(event.clientY - dragRef.current.startY) > 3) dragRef.current.hasMoved = true;
+        if (dragRef.current.hasMoved && edgePanFrameRef.current === null) {
+            let previousTime = performance.now();
+            const tick = (now: number) => {
+                if (!dragRef.current.isDraggingNode || !containerRef.current) { edgePanFrameRef.current = null; return; }
+                const pointer = dragPointerRef.current;
+                const velocity = canvasEdgePanVelocity(pointer, containerRef.current.getBoundingClientRect());
+                const seconds = Math.min(32, now - previousTime) / 1000;
+                previousTime = now;
+                if (velocity.x || velocity.y) {
+                    const viewport = viewportRef.current;
+                    previewViewport({ ...viewport, x: viewport.x + velocity.x * seconds, y: viewport.y + velocity.y * seconds });
+                    edgePannedRef.current = true;
+                    const current = screenToCanvas(pointer.x, pointer.y);
+                    pendingNodeDragRef.current = { x: current.x - dragRef.current.startWorld.x, y: current.y - dragRef.current.startWorld.y };
+                    const aligned = calculateNodeAlignment(alignmentContextRef.current, pendingNodeDragRef.current, 7 / viewport.k);
+                    applyCanvasNodeDragPreview(containerRef.current, { ...aligned.offset, nodeIds: dragRef.current.draggedRenderNodeIdSet });
+                }
+                edgePanFrameRef.current = requestAnimationFrame(tick);
+            };
+            edgePanFrameRef.current = requestAnimationFrame(tick);
+        }
         if (dragFrameRef.current) return;
         dragFrameRef.current = requestAnimationFrame(() => {
             const aligned = calculateNodeAlignment(alignmentContextRef.current, pendingNodeDragRef.current, 7 / viewportRef.current.k);
@@ -283,7 +321,7 @@ export function useCanvasSelectionController({
             setAlignmentGuides((current) => current.vertical === nextGuides.vertical && current.horizontal === nextGuides.horizontal ? current : nextGuides);
             dragFrameRef.current = null;
         });
-    }, [containerRef, viewportRef]);
+    }, [containerRef, viewportRef, screenToCanvas, previewViewport]);
 
     const updateSelectionPreview = useCallback((world: Position, commit: boolean) => {
         let gesture = selectionGestureRef.current;
@@ -373,6 +411,8 @@ export function useCanvasSelectionController({
         window.addEventListener("pointercancel", cancel);
         window.addEventListener("blur", cancel);
         return () => {
+            if (edgePanFrameRef.current !== null) cancelAnimationFrame(edgePanFrameRef.current);
+            edgePanFrameRef.current = null;
             if (dragFrameRef.current) cancelAnimationFrame(dragFrameRef.current);
             if (selectionFrameRef.current) cancelAnimationFrame(selectionFrameRef.current);
             applyCanvasNodeDragPreview(containerRef.current, null);

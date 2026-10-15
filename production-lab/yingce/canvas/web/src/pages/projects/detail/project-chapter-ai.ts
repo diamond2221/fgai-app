@@ -7,6 +7,7 @@ import { backendProviderConfig, parseBackendGenerationResult } from "@/services/
 import { createGenerationTask, waitForGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import type { Skill } from "@/services/api/skills";
 import { skillRuntime } from "@/services/skill-runtime";
+import { runShortDramaText } from "@/services/short-drama-text";
 import { logicalModelIDForConfig, type AiConfig } from "@/stores/use-config-store";
 import { modelOptionName } from "@/stores/use-config-store";
 import { dramaStoryboardContract, parseDramaProductionPlan, validateDramaStoryboard, type DramaProductionPlan } from "@/lib/short-drama-production";
@@ -26,6 +27,7 @@ type ChapterAnalysisInput = {
 
 type ChapterTaskOptions = {
     onTaskUpdate?: (task: GenerationTask) => void;
+    onFallback?: (message: string, failedTask: GenerationTask) => void;
 };
 
 export type ChapterTaskKind = "characters" | "storyboard";
@@ -103,8 +105,12 @@ type ChapterStoryboardGenerationInput = {
 };
 
 export async function generateChapterStoryboard(input: ChapterStoryboardGenerationInput, options?: ChapterTaskOptions) {
-    const model = input.config.textModel || input.config.model;
-    const config = { ...input.config, model };
+    return runShortDramaText(input.config, config => generateChapterStoryboardWithConfig({ ...input, config }, options), options?.onFallback);
+}
+
+async function generateChapterStoryboardWithConfig(input: ChapterStoryboardGenerationInput, options?: ChapterTaskOptions) {
+    const model = input.config.model;
+    const config = input.config;
     const skillExecution = await skillRuntime.prepare({
         profile: "shortDrama",
         prompt: [`章节：${input.chapterTitle}`, input.sourceText, "请将本章拆解为可直接进入短剧制作的完整视频片段，保持剧情因果、人物关系、关键动作与台词完整。"].join("\n\n"),
@@ -164,13 +170,12 @@ export function chapterStoryboardPrompt(input: Pick<ChapterStoryboardGenerationI
 }
 
 async function runProjectTextTask(input: ChapterAnalysisInput, operation: string, promptTemplateVariables: Record<string, string>, options?: ChapterTaskOptions) {
-    const model = input.config.textModel || input.config.model;
-    const result = await runBackendCanvasGenerationTask({
+    const result = await runShortDramaText(input.config, async config => runBackendCanvasGenerationTask({
         projectId: input.projectId,
         nodeId: `${operation}:${input.chapterId}`,
         mode: "text",
         prompt: promptTemplateTaskPlaceholder("章节角色、场景与道具提取"),
-        config: { ...input.config, model },
+        config,
         metadata: {
             domainProjectId: input.projectId,
             chapterId: input.chapterId,
@@ -180,7 +185,7 @@ async function runProjectTextTask(input: ChapterAnalysisInput, operation: string
             builtinDramaSkills: (await shortDramaSkillProvenance()).filter((skill) => skill.name === "short-drama-asset-prompts"),
         },
         onTaskCreated: options?.onTaskUpdate,
-    });
+    }), options?.onFallback);
     if (!result.text?.trim()) throw new Error("模型没有返回可用结果");
     return result.text;
 }

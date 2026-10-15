@@ -31,9 +31,11 @@ export async function downloadBrowserMedia({ fileName, storageKey, url, variant 
     const anchor = document.createElement("a");
     anchor.href = href;
     anchor.download = fileName;
+    anchor.target = "_blank";
     anchor.rel = "noopener noreferrer";
     anchor.style.display = "none";
     document.body.appendChild(anchor);
+    // Cross-origin downloads may navigate instead; keep that navigation out of the editing tab.
     anchor.click();
     anchor.remove();
 }

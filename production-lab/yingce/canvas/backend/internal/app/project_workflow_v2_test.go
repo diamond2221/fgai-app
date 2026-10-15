@@ -96,6 +96,9 @@ func TestRegisterTaskOutputFromTaskPersistsMediaAssetAndArtifactIdempotently(t *
 	if len(asset.PrimaryVersionID) > 36 || asset.PrimaryVersionID != versionID {
 		t.Fatalf("primary version ID = %q, want %q with at most 36 characters", asset.PrimaryVersionID, versionID)
 	}
+	if asset.Title != "镜头01-镜头视频-v1" {
+		t.Fatalf("generated asset title = %q", asset.Title)
+	}
 	var version model.AssetVersion
 	if err := db.First(&version, "id = ?", versionID).Error; err != nil {
 		t.Fatal(err)

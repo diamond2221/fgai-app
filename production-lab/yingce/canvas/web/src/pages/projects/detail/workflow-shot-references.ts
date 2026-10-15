@@ -29,6 +29,7 @@ export function inferShotVisualAssets(assets: ProjectAsset[], text: string, expl
     const normalized = text.normalize("NFKC").toLocaleLowerCase();
     const names = new Map<string, ProjectAsset[]>();
     for (const asset of assets) {
+        if (!["character", "environment", "prop"].includes(normalizeAssetCategory(asset.category))) continue;
         const name = asset.title.trim().normalize("NFKC").toLocaleLowerCase();
         if (name.length < 2 || !asset.primaryVersionId || !["ready", "confirmed"].includes(asset.status) || !projectAssetReferenceImage(asset)) continue;
         names.set(name, [...(names.get(name) || []), asset]);

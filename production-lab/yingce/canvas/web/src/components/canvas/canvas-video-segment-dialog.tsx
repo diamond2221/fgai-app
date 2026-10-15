@@ -24,6 +24,7 @@ export type CanvasVideoSegmentParams = {
     action?: "extract" | "create-generation-nodes";
     startMs: number;
     endMs: number;
+    sourceDurationMs?: number;
     prompt?: string;
     segments?: CanvasVideoSegmentItem[];
     model?: string;
@@ -188,6 +189,7 @@ export function CanvasVideoSegmentDialog({ node, nodes, connections, open, mode,
                 action: videoAction,
                 startMs: 0,
                 endMs: 0,
+                sourceDurationMs: durationMs,
                 segments: segments.map(({ id, startMs, endMs, sourceNodeId, sourceStorageKey, sourceUrl }) => ({ id, startMs, endMs, sourceNodeId, sourceStorageKey, sourceUrl })),
                 model: createsGenerationNodes ? resolvedModel : undefined,
                 operation: createsGenerationNodes ? operation : undefined,
@@ -203,7 +205,7 @@ export function CanvasVideoSegmentDialog({ node, nodes, connections, open, mode,
             message.warning("片段时长至少 0.1 秒");
             return;
         }
-        onConfirm({ mode: "audio", startMs: rangeMs.startMs, endMs: rangeMs.endMs });
+        onConfirm({ mode: "audio", startMs: rangeMs.startMs, endMs: rangeMs.endMs, sourceDurationMs: durationMs });
     };
 
     const title = (
