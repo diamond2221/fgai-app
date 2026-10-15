@@ -9,7 +9,7 @@ process.env.MEILIN_INTERNAL_SECRET='test-gateway-only-32-byte-secret';
 const actor=randomUUID(),stranger=randomUUID(),drama=randomUUID(),model='claude-sonnet-5-5-t3a',pg=new PGlite();
 await pg.exec(`CREATE TABLE users(id varchar(36) PRIMARY KEY,display_name text,status text);
  CREATE TABLE fg_accounts(user_id varchar(36),email text,platform_role text);
- CREATE TABLE projects(id varchar(36) PRIMARY KEY);
+ CREATE TABLE projects(id varchar(36) PRIMARY KEY,user_id text,name text,type text,status text,UNIQUE(user_id,name));
  CREATE TABLE tasks(id varchar(36) PRIMARY KEY,user_id text,project_id text,input_json text,status text,result_json text);
  CREATE TABLE fg_meilin_dramas(id uuid PRIMARY KEY,owner_id text,deleted_at timestamptz);
  CREATE TABLE fg_meilin_members(drama_id uuid,user_id text,role text);
@@ -34,7 +34,11 @@ const native=createServer(async(req,res)=>{
  const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString()||'{}'),owner=req.headers.cookie;
  const send=(status,data)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify({code:status===200?0:status,data,msg:status===200?'':'test rejection'}));};
  if(req.url==='/api/features')return send(200,{features:{meilinEnabled:true}});
- if(req.url==='/api/projects'){const id=randomUUID();await pg.query('INSERT INTO projects VALUES($1)',[id]);return send(200,{project:{id}});}
+ if(req.url==='/api/projects'||req.url==='/api/meilin/billing-project'){
+  if(mode==='short-drama-off'&&req.url==='/api/projects')return send(403,null);
+  const id=randomUUID(),name=input.dramaId?'美林 · 超级导演 · '+input.dramaId.toLowerCase():'美林 · 超级导演';
+  await pg.query("INSERT INTO projects VALUES($1,$2,$3,'creator','active')",[id,owner,name]);return send(200,{project:{id}});
+ }
  if(req.url==='/api/tasks'&&req.method==='POST'){
   attempts++;if(mode==='reject')return send(402,null);
   const id=randomUUID();await pg.query('INSERT INTO tasks VALUES($1,$2,$3,$4,$5,$6)',[id,owner,input.projectId,JSON.stringify(input.input),'succeeded',JSON.stringify({text:'测试文本'})]);
@@ -45,13 +49,25 @@ const native=createServer(async(req,res)=>{
 });await new Promise(r=>native.listen(0,'127.0.0.1',r));
 const context={pool,web:new URL(`http://127.0.0.1:${native.address().port}`),publicOrigin:'http://127.0.0.1',canvasSession:async a=>a.id};
 const gateway=createServer(async(req,res)=>{if(!await meilinInternalRoute(req,res,{...context,path:new URL(req.url,'http://local')})){res.writeHead(404);res.end();}});await new Promise(r=>gateway.listen(0,'127.0.0.1',r));
-const base=`http://127.0.0.1:${gateway.address().port}`,call=async(action,payload={},who=actor,signed=true)=>{const path=`/internal/meilin/${who}/${drama}/${action}`,r=await fetch(base+path,{method:'POST',headers:{...(signed?meilinHeaders({id:who},'POST',path):{}),'content-type':'application/json'},body:JSON.stringify(payload)});return {status:r.status,body:await r.json()};};
+const base=`http://127.0.0.1:${gateway.address().port}`,call=async(action,payload={},who=actor,signed=true,targetDrama=drama)=>{const path=`/internal/meilin/${who}/${targetDrama}/${action}`,r=await fetch(base+path,{method:'POST',headers:{...(signed?meilinHeaders({id:who},'POST',path):{}),'content-type':'application/json'},body:JSON.stringify(payload)});return {status:r.status,body:await r.json()};};
 const request=()=>({operationId:randomUUID(),kind:'text',model,payload:{messages:[{role:'user',content:'写剧本'}],max_tokens:100},metadata:{episodeId:'episode-1'}});
 test.after(async()=>{await Promise.all([native,gateway].map(s=>new Promise(r=>s.close(r))));await pg.close();});
 
 test('unsigned and foreign actors are rejected before native task submission',async()=>{const n=attempts;assert.equal((await call('submit',request(),actor,false)).status,400);assert.equal((await call('submit',request(),stranger)).status,400);assert.equal(attempts,n);});
 test('native task admission is idempotent and mutated replays fail closed',async()=>{mode='normal';const input=request(),n=attempts,a=await call('submit',input),b=await call('submit',input);assert.equal(a.status,200);assert.equal(b.body.taskId,a.body.taskId);assert.equal(attempts,n+1);assert.equal((await call('submit',{...input,payload:{...input.payload,max_tokens:200}})).status,400);const task=await call('task',{taskId:a.body.taskId});assert.equal(task.body.result.text,'测试文本');});
 test('lost admission response recovers the original FG task by stable metadata',async()=>{mode='lost';const input=request(),n=attempts;assert.equal((await call('submit',input)).status,400);mode='normal';const recovered=await call('submit',input);assert.equal(recovered.status,200);assert.ok(recovered.body.taskId);assert.equal(attempts,n+1);});
+test('an admitted task remains recoverable after its model is disabled',async()=>{
+ mode='lost';const input=request(),before=attempts;
+ assert.equal((await call('submit',input)).status,400);
+ await pg.query('UPDATE channel_models SET enabled=false');mode='normal';
+ try{
+  const recovered=await call('submit',input);assert.equal(recovered.status,200);
+  assert.ok(recovered.body.taskId);assert.equal(attempts,before+1);
+  assert.equal((await call('submit',input)).body.taskId,recovered.body.taskId);
+  assert.equal((await call('submit',{...input,payload:{...input.payload,max_tokens:200}})).status,400);
+  assert.equal((await call('submit',request())).status,400);assert.equal(attempts,before+1);
+ }finally{await pg.query('UPDATE channel_models SET enabled=true');}
+});
 test('definite budget rejection releases only the unsent operation for a later retry',async()=>{mode='reject';const input=request(),n=attempts;assert.equal((await call('submit',input)).status,400);assert.equal((await pg.query('SELECT * FROM fg_meilin_calls WHERE operation_id=$1',[input.operationId])).rows.length,0);mode='normal';assert.equal((await call('submit',input)).status,200);assert.equal(attempts,n+2);});
 test('dynamic model disabling prevents admission and cost SQL handles an empty ledger',async()=>{await pg.query('UPDATE channel_models SET enabled=false');const n=attempts;assert.equal((await call('submit',request())).status,400);assert.equal(attempts,n);await pg.query('UPDATE channel_models SET enabled=true');const costs=await call('costs');assert.equal(costs.status,200);assert.deepEqual(costs.body.calls,[]);});
 test('costs match FG receipt settlement and never return raw provider payloads',async()=>{
@@ -61,4 +77,16 @@ test('costs match FG receipt settlement and never return raw provider payloads',
  await pg.exec("INSERT INTO fg_provider_fees VALUES('receipt-one',0.1,7);INSERT INTO fg_fee_matches VALUES('receipt-one','call-one');");
  data=(await call('costs')).body;assert.equal(data.calls[0].settledCny,.7);
  await pg.exec("DELETE FROM fg_fee_matches;INSERT INTO fg_request_decisions VALUES('call-one');");data=(await call('costs')).body;assert.equal(data.calls[0].settledCny,0);
+});
+test('Meilin billing projects do not depend on the short-drama feature gate',async()=>{
+ const freshDrama=randomUUID();await pg.query('INSERT INTO fg_meilin_dramas VALUES($1,$2,NULL)',[freshDrama,actor]);mode='short-drama-off';
+ try{
+  assert.equal((await call('submit',request(),actor,true,freshDrama)).status,200);
+  const link=(await pg.query('SELECT native_project_id FROM fg_meilin_projects WHERE drama_id=$1',[freshDrama])).rows[0];
+  assert.ok(link);assert.equal((await pg.query('SELECT count(*) n FROM projects')).rows[0].n,2);
+  await pg.query('DELETE FROM fg_meilin_projects WHERE drama_id=$1',[freshDrama]);
+  assert.equal((await call('submit',request(),actor,true,freshDrama)).status,200);
+  assert.equal((await pg.query('SELECT native_project_id FROM fg_meilin_projects WHERE drama_id=$1',[freshDrama])).rows[0].native_project_id,link.native_project_id);
+  assert.equal((await pg.query('SELECT count(*) n FROM projects')).rows[0].n,2);
+ }finally{mode='normal';}
 });

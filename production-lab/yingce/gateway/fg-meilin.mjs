@@ -55,7 +55,13 @@ async function accessible(pool,drama,actor,write){
 async function project(pool,drama,owner,api){
  const client=await pool.connect();try{await client.query('BEGIN');await client.query("SELECT pg_advisory_xact_lock(hashtext('meilin-project:'||$1))",[drama]);
  let p=(await client.query('SELECT native_project_id FROM fg_meilin_projects WHERE drama_id=$1 AND owner_id=$2',[drama,owner])).rows[0];
- if(!p){const data=await api('/projects','POST',{name:'美林 · 超级导演',type:'creator',aspectRatio:'9:16',sourceType:'text',description:'美林独立剧目；费用按剧、集、段与资产归属。'});p={native_project_id:data.project.id};await client.query('INSERT INTO fg_meilin_projects(drama_id,owner_id,native_project_id) VALUES($1,$2,$3)',[drama,owner,p.native_project_id]);}
+ if(!p){
+  // Recover project creation when its response or the mapping transaction was
+  // lost; FG enforces a per-owner unique name for this stable drama UUID.
+  const existing=(await client.query("SELECT id FROM projects WHERE user_id=$1 AND name=$2 AND type='creator' AND status='active'",[owner,'美林 · 超级导演 · '+drama.toLowerCase()])).rows[0];
+  const data=existing?{project:existing}:await api('/meilin/billing-project','POST',{dramaId:drama});
+  p={native_project_id:data.project.id};await client.query('INSERT INTO fg_meilin_projects(drama_id,owner_id,native_project_id) VALUES($1,$2,$3)',[drama,owner,p.native_project_id]);
+ }
  await client.query('COMMIT');return p.native_project_id;
  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
 }
@@ -102,6 +108,21 @@ export async function meilinInternalRoute(req,res,ctx){
   }
   if(action==='task'){
    const link=(await ctx.pool.query('SELECT * FROM fg_meilin_calls WHERE drama_id=$1 AND task_id=$2',[drama,input.taskId])).rows[0];if(!link)throw Error('任务不属于此剧');json(res,200,await taskView(ctx.pool,link,ctx));return true;
+  }
+  // Resume an admitted operation before checking today's model catalog. A
+  // disabled model blocks new admission, not recovery of already-created work.
+  if(action==='submit'){
+   if(!uuid.test(input.operationId))throw Error('缺少稳定的生成操作标识');
+   const prior=(await ctx.pool.query('SELECT * FROM fg_meilin_calls WHERE operation_id=$1',[input.operationId])).rows[0];
+   if(prior){
+    if(prior.request_hash!==digest(input)||prior.drama_id!==drama||prior.actor_id!==actorId)throw Error('操作编号已用于不同请求，拒绝重复扣费');
+    if(!prior.task_id){
+     prior.task_id=(await ctx.pool.query("SELECT t.id FROM tasks t JOIN fg_meilin_projects p ON p.native_project_id=t.project_id WHERE t.user_id=$1 AND p.drama_id=$2 AND p.owner_id=$1 AND t.input_json::jsonb #>> '{metadata,clientOperationId}'=$3 LIMIT 1",[actorId,drama,'meilin-'+input.operationId])).rows[0]?.id;
+     if(!prior.task_id)throw Error('原请求已登记，等待恢复，未重新提交');
+     await ctx.pool.query('UPDATE fg_meilin_calls SET task_id=$2 WHERE operation_id=$1',[input.operationId,prior.task_id]);
+    }
+    json(res,200,{taskId:prior.task_id,status:'queued'});return true;
+   }
   }
   const selected=await selectedAdvertisingModel(ctx.pool,input.kind,input.model),payload=input.payload||{},refs=input.references||[];
   const config=input.kind==='text'?{}:creatorGenerationConfig(selected,payload,input.kind);

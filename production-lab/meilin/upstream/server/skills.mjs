@@ -70,6 +70,7 @@ export function loadSkill(stage, id, part, model) {
   const out = [];
   for (const f of files) {
     const p = join(dir, f);
+    if(integrated&&!existsSync(p))throw Error(`技能文件缺失：${id}/${f}，请安装完整技能包`);
     if (existsSync(p)) out.push(`<<${s.id}/${f}>>\n${readFileSync(p, 'utf8')}`);
   }
   const text=out.join('\n\n');if(integrated){const c=context();c.skillsUsed ||= {};c.skillsUsed[`${stage}:${id}`]=createHash('sha256').update(text).digest('hex');}return text;

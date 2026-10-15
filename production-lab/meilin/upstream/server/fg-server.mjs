@@ -91,7 +91,7 @@ export function createMeilinServer(){return createServer(async(req,res)=>{
 });}
 let refreshing=false;
 export async function recover(){if(refreshing)return;refreshing=true;try{
- for(const item of await db.active())await runContext({actor:{id:item.owner_id},dramaId:item.id},async()=>{try{await catalog();await withDrama(item.id,async d=>{await production.refresh(d);return {};});}catch{/* The durable operation remains available for the next recovery pass. */}});
+ for(const item of await db.active())await runContext({actor:{id:item.owner_id},dramaId:item.id,action:'recover'},async()=>{try{await catalog();await withDrama(item.id,async d=>{await production.refresh(d);return {};});}catch{/* The durable operation remains available for the next recovery pass. */}});
 }finally{refreshing=false;}}
 if(process.env.MEILIN_NO_LISTEN!=='1'){
  if(!integrated)throw Error('生产服务必须使用 MEILIN_MODE=fg');await db.initialize();

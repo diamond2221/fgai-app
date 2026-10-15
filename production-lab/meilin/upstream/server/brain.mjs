@@ -509,6 +509,8 @@ async function actCore(d, type, payload = {}, ctx = {}) {
     }
     case 'style.decode': {
       if (!d.bible) return r('还没有剧集圣经。');
+      if(!Array.isArray(payload.refs)||payload.refs.length>6)throw Error('画风参考图最多 6 张，请核对后重新提交');
+      if(payload.refs.some(id=>!d.uploads.some(u=>u.id===id&&u.mime?.startsWith('image/'))))throw Error('请选择本剧已上传的画风参考图片');
       const refs = (payload.refs || []).map((id) => d.uploads.find((u) => u.id === id)).filter(Boolean).map((u) => ({ url: u.url, name: u.name, id: u.id }));
       if (!refs.length) return r('先上传一到六张参考图。');
       d.bible.style = live ? await liveDecodeStyle(d, refs, payload.note) : ST.styleFromPaletteMock(refs, payload.palette || [], payload.note);

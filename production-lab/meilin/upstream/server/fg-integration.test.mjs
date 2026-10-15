@@ -2,19 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {createServer} from 'node:http';
-import {mkdtemp,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,mkdir,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
 process.env.MEILIN_MODE='fg';process.env.MEILIN_NO_LISTEN='1';process.env.MEILIN_INTERNAL_SECRET='test-only-local-identity-secret';
-const temp=await mkdtemp(join(tmpdir(),'meilin-fg-test-'));process.env.MEILIN_FILES_DIR=temp;
+const temp=await mkdtemp(join(tmpdir(),'meilin-fg-test-'));process.env.MEILIN_FILES_DIR=temp;process.env.MEILIN_SKILLS_DIR=join(temp,'skills');
 const {capabilities}=await import('./fg/fg-model-capabilities.mjs');
 const {runContext}=await import('./fg-context.mjs');
 const contract=await import('./fg-contract.mjs');
 const store=await import('./fg-store.mjs');
 const brain=await import('./brain.mjs');
 const production=await import('./fg-production.mjs');
+const skills=await import('./skills.mjs');
 const {createMeilinServer}=await import('./fg-server.mjs');
 const actor={id:'72f7e666-928a-4b00-8b01-a49fbf07683b',name:'甲'},other={id:'82f7e666-928a-4b00-8b01-a49fbf07683b',name:'乙'};
 const image='dola-seedream-5-0-pro-260628';
@@ -69,4 +70,23 @@ test('creation replay uses the same project ID and another account cannot read i
  const a=await fetch(base+'/api/dramas',{method:'POST',headers,body:'{}'});assert.equal(a.status,200);assert.equal((await a.json()).id,id);
  const b=await fetch(base+'/api/dramas',{method:'POST',headers,body:'{}'});assert.equal(b.status,200);assert.equal((await b.json()).id,id);
  const path='/api/dramas/'+id;assert.equal((await fetch(base+path,{headers:contract.signIdentity(other,'GET',path,process.env.MEILIN_INTERNAL_SECRET)})).status,404);
+});
+test('style decoding rejects more than six references before a model call',async()=>{
+ await scoped(actor,async()=>{
+  const d=brain.createDrama();d.bible={};d.uploads=Array.from({length:7},(_,i)=>({id:String(i),mime:'image/png',url:`/files/${randomUUID()}.png`,name:`参考${i}`}));
+  const before=submissions;
+  await assert.rejects(brain.act(d,'style.decode',{refs:d.uploads.map(u=>u.id)}),/最多.*6|一到六/);
+  assert.equal(submissions,before);
+ });
+});
+test('creation, confirmation and deletion have durable audit events',async()=>{
+ let id;
+ await scoped(actor,async()=>{const d=brain.createDrama();id=d.id;await store.save(d);});
+ await runContext({actor,models,dramaId:id,action:'confirm'},async()=>{const d=await store.get(id);await store.save(d);await store.remove(id);});
+ const events=(await memory.query('SELECT action FROM fg_meilin_events WHERE drama_id=$1 ORDER BY created_at,id',[id])).rows.map(x=>x.action);
+ assert.equal(events.filter(x=>x==='create').length,1);assert.ok(events.includes('confirm'));assert.equal(events.filter(x=>x==='delete').length,1);
+});
+test('an incomplete external skill package is rejected instead of silently shortened',async()=>{
+ const dir=join(process.env.MEILIN_SKILLS_DIR,'zy-cinematic-realism');await mkdir(dir,{recursive:true});await writeFile(join(dir,'SKILL.md'),'test skill entry');
+ await scoped(actor,async()=>{assert.throws(()=>skills.loadSkill('render','zy-cinematic-realism','compile','gpt-image-2'),/技能文件缺失/);});
 });

@@ -5,6 +5,13 @@ description: 从产品功能快速定位主要代码入口
 
 # 代码功能地图
 
+## 美林独立板块
+
+- 入口：`web/src/pages/meilin.tsx`；侧栏与功能开放开关使用 `meilinEnabled`，默认关闭。
+- 计费项目：`internal/handler/meilin.go` → `app/meilin.go`；独立美林鉴权与固定所有者/剧 UUID 命名，不依赖短剧开关。
+- 公司任务桥接与计费映射：上层 `production-lab/yingce/gateway/fg-meilin.mjs`；完整业务服务、持久化、确认、恢复与前端在 `production-lab/meilin/upstream/`。使用 FG 原生任务、资源与人民币账本。
+- 验收范围与未完成项见 `production-lab/meilin/PROGRESS.md`，本地替身成功不代表实机部署或付费模型验收。
+
 ## 用户登录日志
 
 - 持久化：`backend/internal/model/models_login_log.go`、`repository/login_logs.go`；会话与日志原子提交在 `repository/account.go`，schema v53 在 `database/migrations.go`。

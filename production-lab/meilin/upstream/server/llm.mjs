@@ -1,11 +1,6 @@
-// WeToken (OpenAI-compatible) text client. Live mode only when WETOKEN_API_KEY is set in the local .env.
+// FG text tasks: the gateway owns provider credentials and billing.
 import {integrated,context,bridge} from './fg-context.mjs';
 import {createHash,randomUUID} from 'node:crypto';
-
-// UI model id → provider model id. Override with WETOKEN_MODEL_MAP='{"claude-sonnet-5-5":"..."}'.
-const DEFAULT_MAP = { 'claude-sonnet-5-5': 'claude-sonnet-5-5-t3a' };
-let MAP = DEFAULT_MAP;
-try { if (process.env.WETOKEN_MODEL_MAP) MAP = { ...DEFAULT_MAP, ...JSON.parse(process.env.WETOKEN_MODEL_MAP) }; } catch { /* keep default */ }
 
 export const liveText = integrated;
 
