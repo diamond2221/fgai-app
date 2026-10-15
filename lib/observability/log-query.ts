@@ -15,7 +15,7 @@ import {
   type LogTimelineBucket,
   type StructuredFilters,
 } from './log-search-contract';
-import { serialiseLogValue } from './server-log';
+import { fullLogPayload, serialiseLogValue } from './server-log';
 
 export { LOG_LEVELS, LOG_SOURCES } from './log-search-contract';
 export type {
@@ -115,6 +115,8 @@ type LogRow = {
   event_id: string | null;
   kind: LogKind;
   occurred_at: Date | string;
+  occurred_at_cursor?: string;
+  sequence_id_cursor?: string;
   source: string;
   category: LogCategory;
   service: string;
@@ -225,7 +227,7 @@ const LOG_CTE = `with logs as (
     log.source,
     case
       when log.source in ('infra', 'deploy') then 'infrastructure'
-      when lower(coalesce(log.service, '') || ' ' || coalesce(log.event_name, '')) ~ '(nas|tunnel|nginx)' then 'infrastructure'
+      when lower(coalesce(log.service, '') || ' ' || coalesce(log.event_name, '')) ~ '(nas|tunnel|nginx|public-media)' then 'infrastructure'
       when log.event_name in ('http_request_received', 'http_exchange_completed') then 'api'
       when log.source = 'frontend' then 'browser'
       when log.source in ('app', 'provider', 'audit') then 'api_runtime'
@@ -276,7 +278,7 @@ const LOG_CTE = `with logs as (
     source,
     case
       when source in ('infra', 'deploy') then 'infrastructure'
-      when lower(coalesce(service, '') || ' ' || coalesce(feature, '') || ' ' || coalesce(action, '') || ' ' || coalesce(code, '')) ~ '(nas|tunnel|nginx)' then 'infrastructure'
+      when lower(coalesce(service, '') || ' ' || coalesce(feature, '') || ' ' || coalesce(action, '') || ' ' || coalesce(code, '')) ~ '(nas|tunnel|nginx|public-media)' then 'infrastructure'
       when source = 'frontend' then 'browser'
       when source in ('app', 'provider', 'audit') then 'api_runtime'
       else 'other'
@@ -347,6 +349,14 @@ const LOG_CTE = `with logs as (
       deployment_version, container_id, metadata::text) as search_text,
     id as sequence_id
   from observability_service_events
+  -- Keep repeated failure samples for availability reports without repeating log entries.
+  -- 重复异常采样保留在原表供可用率报表使用，日志展示仅隐藏明确标记的心跳。
+  where not (
+    service in ('tunnel', 'public-media')
+    and state = 'unhealthy'
+    and coalesce(previous_state = 'unhealthy', false)
+    and coalesce(metadata->'monitorHeartbeat' = 'true'::jsonb, false)
+  )
 )`;
 
 function numberValue(value: number | string | null | undefined) {
@@ -519,20 +529,30 @@ function decodeCursor(value: string | null | undefined): LogCursor | null {
   try {
     if (value.length > 512) throw new Error('cursor too long');
     const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<LogCursor>;
-    const occurredAt = dateValue(typeof parsed.occurredAt === 'string' ? parsed.occurredAt : undefined);
-    const sequenceId = String(parsed.sequenceId ?? '');
-    if (!occurredAt || !/^\d+$/.test(sequenceId) || typeof parsed.id !== 'string' || !parsed.id) {
+    const occurredAt = parsed.occurredAt;
+    const sequenceId = parsed.sequenceId;
+    if (typeof occurredAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6}Z$/.test(occurredAt)
+      || typeof sequenceId !== 'string' || !/^\d{1,19}$/.test(sequenceId)
+      || BigInt(sequenceId) > BigInt('9223372036854775807')
+      || typeof parsed.id !== 'string' || !parsed.id || parsed.id.length > 240) {
       throw new Error('invalid cursor');
     }
-    return { occurredAt: occurredAt.toISOString(), sequenceId, id: parsed.id.slice(0, 240) };
+    const date = dateValue(occurredAt);
+    if (!date || date.toISOString().slice(0, 19) !== occurredAt.slice(0, 19)) throw new Error('invalid cursor date');
+    // Keep PostgreSQL microseconds intact; Date is only used to validate calendar fields.
+    // 保留 PostgreSQL 微秒精度，Date 仅用于校验日期字段，不参与游标格式化。
+    return { occurredAt, sequenceId, id: parsed.id };
   } catch {
     throw new LogQueryValidationError('日志游标无效');
   }
 }
 
 function encodeCursor(row: LogRow): string {
-  const occurredAt = row.occurred_at instanceof Date ? row.occurred_at.toISOString() : new Date(row.occurred_at).toISOString();
-  const cursor: LogCursor = { occurredAt, sequenceId: String(row.sequence_id), id: row.id };
+  const occurredAt = row.occurred_at_cursor;
+  if (!occurredAt) throw new Error('Missing precise log cursor timestamp');
+  const sequenceId = row.sequence_id_cursor;
+  if (!sequenceId) throw new Error('Missing precise log cursor sequence');
+  const cursor: LogCursor = { occurredAt, sequenceId, id: row.id };
   return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
 }
 
@@ -653,7 +673,7 @@ function bucketForRange(filters: NormalizedLogQuery) {
 }
 
 function normalizeRecord(row: LogRow, includeDetails = false): LogRecord {
-  const serialisedDetails = serialiseLogValue(row.details);
+  const serialisedDetails = serialiseLogValue(includeDetails ? fullLogPayload(row.details) : row.details);
   const details = serialisedDetails && typeof serialisedDetails === 'object' && !Array.isArray(serialisedDetails)
     ? serialisedDetails as Record<string, unknown>
     : {};
@@ -815,7 +835,9 @@ export async function queryLogExplorer(input: LogQueryInput = {}): Promise<LogEx
     page as (
       select id, event_id, kind, occurred_at, source, category, service, event_name, level, outcome,
              message, trace_id, request_id, task_id, user_id, actor_email, route, http_status,
-             duration_ms, details, sequence_id
+             duration_ms, details, sequence_id,
+             to_char(occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as occurred_at_cursor,
+             sequence_id::text as sequence_id_cursor
         from filtered ${pageWhereSql}
        ${orderClause()}
        limit ${pageLimitParam}

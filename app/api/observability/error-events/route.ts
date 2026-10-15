@@ -46,6 +46,7 @@ function enumValue<T extends string>(value: unknown, values: Set<T>, fallback: T
 }
 
 function status(value: unknown) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isInteger(number) && number >= 100 && number <= 599 ? number : null;
 }
@@ -60,7 +61,11 @@ export async function POST(request: Request) {
   if (!hasObservabilitySecret(request)) return NextResponse.json({ error: 'not found' }, { status: 404 });
   let body: ErrorBody;
   try {
-    body = await request.json();
+    const value: unknown = await request.json();
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return NextResponse.json({ error: 'invalid event' }, { status: 400 });
+    }
+    body = value as ErrorBody;
   } catch {
     return NextResponse.json({ error: 'invalid event' }, { status: 400 });
   }

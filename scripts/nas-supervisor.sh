@@ -8,11 +8,12 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$PROJECT_ROOT/scripts/lock-utils.sh"
+source "$PROJECT_ROOT/scripts/app-log-archive.sh"
 if ! register_lock_protocol_process; then
   printf 'NAS supervisor: cannot register the current lock protocol process\n' >&2
   exit 1
 fi
-trap 'unregister_lock_protocol_process' EXIT
+trap 'fg_app_archive_cancel; unregister_lock_protocol_process' EXIT
 ENV_FILE="${FG_NAS_ENV_FILE:-$PROJECT_ROOT/.env.docker}"
 # Keep supervisor events beside monitor state so they survive app outages.
 # 将守护事件放在监控器的持久状态目录中，确保 App 离线时仍可等待投递。
@@ -29,6 +30,7 @@ PERSISTENT_STATE_ROOT="$HOME/Library/Application Support/fg-studio-nas-superviso
 NAS_GUARD_ROOT="$HOME/Library/Application Support/fg-studio-nas-state"
 NAS_DISABLED_HOST_FILE="$NAS_GUARD_ROOT/disabled"
 STATE_FILE="$STATE_ROOT/state"
+PENDING_EVENT_ROOT="$PERSISTENT_STATE_ROOT/pending-events"
 LAST_SUCCESS_FILE="$STATE_ROOT/last-storage-success"
 LOCK_FILE="$STATE_ROOT/lock"
 MOUNT_RETRY_FILE="$STATE_ROOT/last-mount-attempt"
@@ -38,6 +40,7 @@ RECREATE_LOCK_FILE="$HOME/Library/Application Support/fg-studio-app-recreate/loc
 RECREATE_LOCK_HELD=0
 STATE_TRANSITION_SEQUENCE=0
 COMPOSE_STORAGE_MODE="offline"
+COMPOSE_RECREATE_TIMED_OUT=0
 APP_DISABLED_FILE="/tmp/fg-studio-nas-disabled"
 MOUNT_REQUESTED=0
 
@@ -67,6 +70,7 @@ if (( LOCK_RESULT != 0 )); then
   exit 1
 fi
 cleanup() {
+  fg_app_archive_cancel
   release_recreate_lock
   exec 8>&-
   unregister_lock_protocol_process
@@ -105,6 +109,7 @@ queue_state_event() {
   local escaped_host
   local escaped_previous
   local escaped_message
+  local pending_file temporary
 
   host="$(hostname -s 2>/dev/null || hostname)"
   observed_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -120,32 +125,66 @@ queue_state_event() {
   escaped_message="$(json_escape "$message (rawState=$next)")"
   payload="{\"host\":\"$escaped_host\",\"service\":\"nas\",\"checkName\":\"supervisor\",\"state\":\"$mapped_state\",\"previousState\":\"$escaped_previous\",\"message\":\"$escaped_message\",\"observedAt\":\"$observed_at\",\"eventKey\":\"$event_key\"}"
 
-  if ! fg_obs_queue_event monitor "$payload"; then
-    log "NAS supervisor: observability outbox enqueue failed for state transition $previous -> $next"
+  # Use the durable outbox first; retain a separate local backup when that enqueue fails.
+  # 优先写入持久 outbox，入队失败则保存独立本地备份；恢复不得覆盖原 observedAt/eventKey。
+  if fg_obs_queue_event monitor "$payload"; then
+    return 0
   fi
+  if ! (umask 077; mkdir -p "$PENDING_EVENT_ROOT"); then
+    log "NAS supervisor: cannot persist transition $previous -> $next; telemetry durability is unavailable"
+    return 1
+  fi
+  pending_file="$PENDING_EVENT_ROOT/$event_id.json"
+  temporary="$(mktemp "$PENDING_EVENT_ROOT/.pending.XXXXXX")" || {
+    log "NAS supervisor: cannot stage transition $previous -> $next; telemetry durability is unavailable"
+    return 1
+  }
+  if ! printf '%s\n' "$payload" > "$temporary" || ! mv "$temporary" "$pending_file"; then
+    rm -f "$temporary" || true
+    log "NAS supervisor: cannot persist transition $previous -> $next; telemetry durability is unavailable"
+    return 1
+  fi
+  log "NAS supervisor: observability enqueue failed for $previous -> $next; local transition retained"
+  return 0
+}
+
+retry_pending_events() {
+  local file payload attempted=0
+  # Bound retries so telemetry backlog cannot delay storage protection.
+  # 限制补投次数，避免观测积压阻塞存储保护。
+  for file in "$PENDING_EVENT_ROOT"/*.json; do
+    [[ -f "$file" ]] || continue
+    ((attempted >= 5)) && break
+    attempted=$((attempted + 1))
+    payload="$(cat "$file")" || continue
+    if fg_obs_queue_event monitor "$payload"; then
+      rm -f "$file" || true
+    else
+      log "NAS supervisor: retained pending event for retry: $file"
+    fi
+  done
+  return 0
 }
 
 run_with_timeout() {
   local timeout_seconds="$1"
-  local command_pid
-  local watchdog_pid
-  local exit_code=0
   shift
-
-  "$@" &
-  command_pid=$!
-  (
-    sleep "$timeout_seconds"
-    kill -TERM "$command_pid" 2>/dev/null || exit 0
-    sleep 1
-    kill -KILL "$command_pid" 2>/dev/null || true
-  ) &
-  watchdog_pid=$!
-
-  wait "$command_pid" || exit_code=$?
-  kill "$watchdog_pid" 2>/dev/null || true
-  wait "$watchdog_pid" 2>/dev/null || true
-  return "$exit_code"
+  # Isolate only this CLI process tree; never signal Docker or container services.
+  # 只隔离并终止本次 CLI 进程树，超时不得停止 Docker daemon 或容器服务。
+  /usr/bin/python3 -c '
+import os, signal, subprocess, sys
+process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+try:
+    sys.exit(process.wait(timeout=float(sys.argv[1])))
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    sys.exit(124)
+' "$timeout_seconds" "$@"
 }
 
 compose() {
@@ -153,7 +192,11 @@ compose() {
   if [[ "$COMPOSE_STORAGE_MODE" == "nas" ]]; then
     compose_files+=(--file "$PROJECT_ROOT/docker-compose.nas.yml")
   fi
-  docker compose "${compose_files[@]}" --project-directory "$PROJECT_ROOT" --env-file "$ENV_FILE" "$@"
+  local result=0
+  COMPOSE_RECREATE_TIMED_OUT=0
+  run_with_timeout 120 docker compose "${compose_files[@]}" --project-directory "$PROJECT_ROOT" --env-file "$ENV_FILE" "$@" || result=$?
+  [[ "$result" == 124 ]] && COMPOSE_RECREATE_TIMED_OUT=1
+  return "$result"
 }
 
 set_state() {
@@ -161,8 +204,11 @@ set_state() {
   local message="$2"
   local current_state=""
   [[ -f "$STATE_FILE" ]] && current_state="$(<"$STATE_FILE")"
+  retry_pending_events
   if [[ "$current_state" != "$next_state" ]]; then
-    queue_state_event "$current_state" "$next_state" "$message"
+    # Safety state must progress even if both telemetry stores fail; report that loss locally.
+    # 两处观测存储都失败时安全业务仍须推进，本地日志明确记录无法持久化的事件。
+    queue_state_event "$current_state" "$next_state" "$message" || true
     printf '%s' "$next_state" > "$STATE_FILE"
     log "$message"
   fi
@@ -214,7 +260,7 @@ find_app_container() {
 }
 
 find_app_image() {
-  docker ps -a \
+  run_with_timeout "$DOCKER_TIMEOUT_SECONDS" docker ps -a \
     --filter label=com.docker.compose.project=fgai-app \
     --filter label=com.docker.compose.service="$APP_SERVICE" \
     --format '{{.Image}}' | head -n 1
@@ -303,7 +349,7 @@ release_recreate_lock() {
 }
 
 start_offline_app_if_missing() {
-  local container
+  local container archive_container
   # Cold starts use the read-only named volume until a fresh NAS bind probe succeeds.
   # 冷启动先使用只读 named volume，直到真实 NAS bind 的新读写探测通过。
   if ! run_with_timeout "$DOCKER_TIMEOUT_SECONDS" docker info >/dev/null 2>&1; then
@@ -326,11 +372,20 @@ start_offline_app_if_missing() {
     return 0
   fi
   COMPOSE_STORAGE_MODE="offline"
+  # Compose can replace an exited App while starting offline storage, so archive it under the same lock.
+  # 启动离线 App 也可能替换已退出容器，必须在同一重建锁下归档其历史日志。
+  if ! archive_container="$(fg_app_archive_container fgai-app)" || ! fg_app_archive_start "$archive_container" "nas-offline" "${FG_APP_LOG_DIR:-$HOME/Library/Logs/fg-studio-app}"; then
+    release_recreate_lock
+    set_state "probe-unavailable" "NAS supervisor: exited App logs could not be archived; offline start deferred"
+    return 1
+  fi
   if ! CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-nas-supervisor-not-used}" compose up -d "$APP_SERVICE" >/dev/null; then
+    fg_app_archive_finish || log "NAS supervisor: offline-start archive is partial; captured lines retained"
     release_recreate_lock
     set_state "app-start-failed" "NAS supervisor: NAS is unavailable and App could not start with isolated offline storage"
     return 1
   fi
+  fg_app_archive_finish || log "NAS supervisor: offline-start archive is partial; captured lines retained"
   container="$(find_app_container 2>/dev/null || true)"
   release_recreate_lock
   if [[ -z "$container" ]]; then
@@ -734,7 +789,7 @@ if ! APP_IMAGE="$(find_app_image 2>/dev/null)"; then
   exit 1
 fi
 APP_IMAGE="${APP_IMAGE:-fgai-app-app}"
-if ! docker image inspect "$APP_IMAGE" >/dev/null 2>&1; then
+if ! run_with_timeout "$DOCKER_TIMEOUT_SECONDS" docker image inspect "$APP_IMAGE" >/dev/null 2>&1; then
   set_state "probe-unavailable" "NAS supervisor: App image is unavailable; cannot verify mounted storage"
   exit 1
 fi
@@ -800,13 +855,27 @@ if (( LOCKED_PROBE_EXIT != 0 )); then
   exit 0
 fi
 COMPOSE_STORAGE_MODE="nas"
+if ! archive_container="$(fg_app_archive_container fgai-app)" || ! fg_app_archive_start "$archive_container" "nas-recovery" "${FG_APP_LOG_DIR:-$HOME/Library/Logs/fg-studio-app}"; then
+  release_recreate_lock
+  mark_recovery_pending
+  set_state "probe-unavailable" "NAS supervisor: old App log follow unavailable; recreation deferred with storage guarded"
+  exit 0
+fi
 if ! CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-nas-supervisor-not-used}" \
   compose up -d --no-deps --force-recreate "$APP_SERVICE" >/dev/null; then
+  fg_app_archive_finish || log "NAS supervisor: old App archive is partial; captured lines retained"
+  if (( COMPOSE_RECREATE_TIMED_OUT )); then
+    release_recreate_lock
+    mark_recovery_pending
+    set_state "app-transitioning" "NAS supervisor: Compose CLI timed out; daemon operation is unconfirmed, keeping guard and deferring fallback"
+    exit 0
+  fi
   if ! restore_offline_app_after_recreate_failure "NAS-mounted App recreation failed"; then
     exit 1
   fi
   exit 0
 fi
+fg_app_archive_finish || log "NAS supervisor: old App archive is partial; captured lines retained"
 
 if ! APP_CONTAINER="$(find_app_container 2>/dev/null)"; then
   if ! restore_offline_app_after_recreate_failure "Docker could not inspect the recreated App"; then

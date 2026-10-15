@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { query } from '@/lib/local/db';
+import { withTransaction } from '@/lib/local/db';
+import type { PoolClient } from 'pg';
 import { redactServerLogText, serialiseLogValue } from './server-log';
 
 export type ObservationSource = 'frontend' | 'app' | 'provider' | 'infra' | 'deploy' | 'billing' | 'data';
@@ -70,6 +71,23 @@ export type ObservationErrorInput = {
   metadata?: unknown;
 };
 
+async function invalidateReports(client: PoolClient, occurredAt: Date, includeSeed: boolean) {
+  // Service state can seed later periods or their incident origin, beyond the freshness window.
+  // 服务状态影响后续周期的 seed 和事故起点，迟到状态须使所有后续已有报表失效。
+  // Advance running watermarks too so publication cannot overwrite invalidation.
+  // 生成期间也推进水位，避免成功发布覆盖失效标记。
+  await client.query(
+    `update report_runs
+        set status = case when status = 'running' then status else 'failed' end,
+            data_as_of = clock_timestamp(), error = null,
+            updated_at = case when status = 'running' then updated_at else clock_timestamp() end
+      where period_end > $1::timestamptz
+        and ($2::boolean or period_start <= $1::timestamptz)
+        and (status in ('running', 'succeeded') or (status = 'failed' and summary <> '{}'::jsonb))`,
+    [occurredAt.toISOString(), includeSeed],
+  );
+}
+
 export async function recordObservationError(input: ObservationErrorInput) {
   // Use ingestion time when the producer omits a timestamp; observability rows are not nullable.
   // 生产端未提供时间时使用接收时间，不能向 NOT NULL 观测表写入 null。
@@ -77,39 +95,50 @@ export async function recordObservationError(input: ObservationErrorInput) {
   const message = text(input.message, 1000);
   const fingerprint = text(input.fingerprint, 64) || observationFingerprint(input);
   const eventKey = nullableText(input.eventKey, 240);
-  const result = await query(
-    `insert into observability_error_events
-      (occurred_at, source, service, feature, action, severity, impact, fingerprint,
-       code, message, stack, trace_id, request_id, task_id, user_id, route,
-       http_status, deployment_version, event_key, metadata)
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-             $16, $17, $18, $19, $20::jsonb)
-     on conflict (event_key) do nothing
-    returning id`,
-    [
-      occurredAt.toISOString(),
-      input.source,
-      text(input.service, 80),
-      nullableText(input.feature, 120),
-      nullableText(input.action, 120),
-      input.severity || 'error',
-      input.impact || 'unknown',
-      fingerprint,
-      nullableText(input.code, 160),
-      message,
-      nullableText(input.stack, 2000),
-      nullableText(input.traceId, 160),
-      nullableText(input.requestId, 160),
-      nullableText(input.taskId, 160),
-      nullableUuid(input.userId),
-      nullableText(input.route, 240),
-      typeof input.httpStatus === 'number' && Number.isInteger(input.httpStatus) ? input.httpStatus : null,
-      nullableText(input.deploymentVersion, 160),
-      eventKey,
-      safeMetadata(input.metadata),
-    ],
-  );
-  return (result.rowCount ?? 0) > 0;
+  return withTransaction(async (client) => {
+    // Bound database waits below the producer HTTP deadline so retries release pool slots.
+    // 数据库等待须短于生产端 HTTP 超时，失败回滚并释放连接供持久队列重试。
+    await client.query("set local statement_timeout = '1500ms'");
+    await client.query("set local lock_timeout = '1000ms'");
+    // Serialize report creation against ingestion without serializing event producers.
+    // 共享事务锁防止入库错过刚创建的报表，同时允许多个生产端并行写入。
+    await client.query("select pg_advisory_xact_lock_shared(hashtext('fg-observability-report-claim'))");
+    const result = await client.query(
+      `insert into observability_error_events
+        (occurred_at, source, service, feature, action, severity, impact, fingerprint,
+         code, message, stack, trace_id, request_id, task_id, user_id, route,
+         http_status, deployment_version, event_key, metadata)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+               $16, $17, $18, $19, $20::jsonb)
+       on conflict (event_key) do nothing
+      returning id`,
+      [
+        occurredAt.toISOString(),
+        input.source,
+        text(input.service, 80),
+        nullableText(input.feature, 120),
+        nullableText(input.action, 120),
+        input.severity || 'error',
+        input.impact || 'unknown',
+        fingerprint,
+        nullableText(input.code, 160),
+        message,
+        nullableText(input.stack, 2000),
+        nullableText(input.traceId, 160),
+        nullableText(input.requestId, 160),
+        nullableText(input.taskId, 160),
+        nullableUuid(input.userId),
+        nullableText(input.route, 240),
+        typeof input.httpStatus === 'number' && Number.isInteger(input.httpStatus) ? input.httpStatus : null,
+        nullableText(input.deploymentVersion, 160),
+        eventKey,
+        safeMetadata(input.metadata),
+      ],
+    );
+    const inserted = (result.rowCount ?? 0) > 0;
+    if (inserted) await invalidateReports(client, occurredAt, false);
+    return inserted;
+  });
 }
 
 export type ObservationServiceInput = {
@@ -131,27 +160,38 @@ export async function recordObservationService(input: ObservationServiceInput) {
   // Use ingestion time when the monitor omits a timestamp; health events must always be time-indexable.
   // 监控端未提供时间时使用接收时间，保证健康事件始终可以按时间索引。
   const observedAt = input.observedAt || new Date();
-  const result = await query(
-    `insert into observability_service_events
-      (observed_at, host, service, check_name, state, previous_state, message,
-       duration_ms, deployment_version, container_id, event_key, metadata)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
-    on conflict (event_key) do nothing
-     returning id`,
-    [
-      observedAt.toISOString(),
-      text(input.host, 120),
-      text(input.service, 80),
-      text(input.checkName, 120) || 'health',
-      input.state,
-      nullableText(input.previousState, 40),
-      text(input.message, 1000),
-      typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) ? Math.max(0, Math.floor(input.durationMs)) : null,
-      nullableText(input.deploymentVersion, 160),
-      nullableText(input.containerId, 160),
-      nullableText(input.eventKey, 240),
-      safeMetadata(input.metadata),
-    ],
-  );
-  return (result.rowCount ?? 0) > 0;
+  return withTransaction(async (client) => {
+    // Bound database waits below the producer HTTP deadline so retries release pool slots.
+    // 数据库等待须短于生产端 HTTP 超时，失败回滚并释放连接供持久队列重试。
+    await client.query("set local statement_timeout = '1500ms'");
+    await client.query("set local lock_timeout = '1000ms'");
+    // Serialize report creation against ingestion without serializing event producers.
+    // 共享事务锁防止入库错过刚创建的报表，同时允许多个生产端并行写入。
+    await client.query("select pg_advisory_xact_lock_shared(hashtext('fg-observability-report-claim'))");
+    const result = await client.query(
+      `insert into observability_service_events
+        (observed_at, host, service, check_name, state, previous_state, message,
+         duration_ms, deployment_version, container_id, event_key, metadata)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+      on conflict (event_key) do nothing
+       returning id`,
+      [
+        observedAt.toISOString(),
+        text(input.host, 120),
+        text(input.service, 80),
+        text(input.checkName, 120) || 'health',
+        input.state,
+        nullableText(input.previousState, 40),
+        text(input.message, 1000),
+        typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) ? Math.max(0, Math.floor(input.durationMs)) : null,
+        nullableText(input.deploymentVersion, 160),
+        nullableText(input.containerId, 160),
+        nullableText(input.eventKey, 240),
+        safeMetadata(input.metadata),
+      ],
+    );
+    const inserted = (result.rowCount ?? 0) > 0;
+    if (inserted) await invalidateReports(client, observedAt, true);
+    return inserted;
+  });
 }

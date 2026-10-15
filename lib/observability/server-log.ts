@@ -11,7 +11,7 @@ type SafeLogValue = string | number | boolean | null | undefined | SafeLogValue[
 
 const SENSITIVE_KEY = /^(authorization|cookie|set-cookie|token|secret|password|api[_-]?key|access[_-]?key|signature|sig)$/i;
 const TRACE_ID = /^[A-Za-z0-9._:-]{8,128}$/;
-const PROVIDER_SENSITIVE_KEY = /^(?:authorization|cookie|set-cookie|token|secret|password|api[_-]?key|access[_-]?key|signature|credential|private[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|x-api-key)$/i;
+const PROVIDER_SENSITIVE_KEY = /^(?:authorization|cookie|set-cookie|token|secret|password|api[_-]?key|access[_-]?key|signature|sig|credential|private[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|x-api-key)$/i;
 const PROVIDER_SENSITIVE_HEADER = /(?:^|[-_])(authorization|cookie|set-cookie|token|secret|password|api[-_]?key|access[-_]?key|signature|credential)(?:$|[-_])/i;
 const PROVIDER_URL_KEY = /(?:url|uri|href)$/i;
 const PROVIDER_BINARY_KEY = /(?:base64|binary|buffer|file[_-]?data|image[_-]?data|video[_-]?data)/i;

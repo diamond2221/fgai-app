@@ -5,7 +5,7 @@ import { getUsdToCnyRate } from '@/lib/usage/fx';
 
 export type ReportType = 'daily' | 'weekly' | 'monthly';
 export type ReportRevision = { reportType: ReportType; periodStart: Date; periodEnd: Date; revision: number; isFinal: boolean };
-export type ReportJobResult = { status: 'succeeded' | 'skipped' | 'failed'; reportRunId?: string; reportType: ReportType; revision: number; error?: string };
+export type ReportJobResult = { status: 'succeeded' | 'skipped' | 'failed'; reportRunId?: string; reportType: ReportType; revision: number; error?: string; recomputed?: boolean };
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -129,37 +129,44 @@ function errorMessage(value: unknown) {
 }
 
 async function claimReportRun(spec: ReportRevision) {
-  const existing = await query<{ id: string; status: string; updated_at: string }>(
-    `select id, status, updated_at
-       from report_runs
-      where report_type = $1 and period_start = $2 and period_end = $3 and revision = $4`,
-    [spec.reportType, spec.periodStart.toISOString(), spec.periodEnd.toISOString(), spec.revision],
-  );
-  const current = existing.rows[0];
-  if (current?.status === 'succeeded') return null;
-  if (current?.status === 'running' && Date.now() - new Date(current.updated_at).getTime() < STALE_RUNNING_MS) return null;
-
-  if (current) {
-    const updated = await query<{ id: string }>(
-      `update report_runs
-          set status = 'running', is_final = $1, data_as_of = now(), error = null, updated_at = now()
-        where id = $2
-          and (status = 'failed' or updated_at < now() - interval '30 minutes')
-      returning id`,
-      [spec.isFinal, current.id],
+  return withTransaction(async (client) => {
+    await client.query("set local statement_timeout = '10s'");
+    await client.query("set local lock_timeout = '5s'");
+    // Coordinate the creation window with ingestion; report reads run outside this lock.
+    // 创建任务时与事件入库互斥，报表读取不持有此锁。
+    await client.query("select pg_advisory_xact_lock(hashtext('fg-observability-report-claim'))");
+    const existing = await client.query<{ id: string; status: string; updated_at: string; summary: unknown }>(
+      `select id, status, updated_at, summary
+         from report_runs
+        where report_type = $1 and period_start = $2 and period_end = $3 and revision = $4`,
+      [spec.reportType, spec.periodStart.toISOString(), spec.periodEnd.toISOString(), spec.revision],
     );
-    return updated.rows[0]?.id || null;
-  }
+    const current = existing.rows[0];
+    if (current?.status === 'succeeded') return null;
+    if (current?.status === 'running' && Date.now() - new Date(current.updated_at).getTime() < STALE_RUNNING_MS) return null;
 
-  const inserted = await query<{ id: string }>(
-    `insert into report_runs
-      (report_type, period_start, period_end, revision, status, is_final, data_as_of, schema_version)
-     values ($1, $2, $3, $4, 'running', $5, now(), $6)
-     on conflict (report_type, period_start, period_end, revision) do nothing
-     returning id`,
-    [spec.reportType, spec.periodStart.toISOString(), spec.periodEnd.toISOString(), spec.revision, spec.isFinal, REPORT_SCHEMA_VERSION],
-  );
-  return inserted.rows[0]?.id || null;
+    if (current) {
+      const updated = await client.query<{ id: string; watermark: string; lease: string }>(
+        `update report_runs
+            set status = 'running', is_final = $1, data_as_of = clock_timestamp(), error = null, updated_at = now()
+          where id = $2
+            and (status = 'failed' or updated_at < now() - interval '30 minutes')
+        returning id, data_as_of::text as watermark, updated_at::text as lease`,
+        [spec.isFinal, current.id],
+      );
+      return updated.rows[0] ? { ...updated.rows[0], recomputed: Object.keys(recordValue(current.summary) || {}).length > 0 } : null;
+    }
+
+    const inserted = await client.query<{ id: string; watermark: string; lease: string }>(
+      `insert into report_runs
+        (report_type, period_start, period_end, revision, status, is_final, data_as_of, schema_version)
+       values ($1, $2, $3, $4, 'running', $5, clock_timestamp(), $6)
+       on conflict (report_type, period_start, period_end, revision) do nothing
+       returning id, data_as_of::text as watermark, updated_at::text as lease`,
+      [spec.reportType, spec.periodStart.toISOString(), spec.periodEnd.toISOString(), spec.revision, spec.isFinal, REPORT_SCHEMA_VERSION],
+    );
+    return inserted.rows[0] ? { ...inserted.rows[0], recomputed: false } : null;
+  });
 }
 
 type AccountRow = {
@@ -186,8 +193,8 @@ type AccountRow = {
   error_count: string | number;
 };
 
-async function accountRows(spec: ReportRevision) {
-  const result = await query<AccountRow>(
+async function accountRows(spec: ReportRevision, client: PoolClient) {
+  const result = await client.query<AccountRow>(
     `with usage_facts as (
        select user_id, kind, status, input_tokens, output_tokens, total_tokens,
               image_count, video_seconds, duration_ms, reported_cost_usd,
@@ -329,9 +336,56 @@ function errorGroupKey(row: Pick<ErrorRow, 'fingerprint' | 'source' | 'service' 
   return [row.fingerprint, row.source, row.service, row.severity, row.impact].join('\u001f');
 }
 
-async function errorRows(spec: ReportRevision) {
-  const result = await query<ErrorRow>(
-    `with raw_errors as (
+async function errorRows(spec: ReportRevision, client: PoolClient) {
+  const result = await client.query<ErrorRow>(
+    `with service_seed as (
+       select distinct on (host, service, check_name) *
+         from observability_service_events
+        where observed_at < $1 and observed_at >= $1::timestamptz - interval '90 seconds'
+        order by host, service, check_name, observed_at desc, id desc
+     ), period_service_events as (
+       select *, row_number() over (partition by host, service, check_name order by observed_at, id) as period_rank
+         from observability_service_events
+        where observed_at >= $1 and observed_at < $2
+     ), service_error_candidates as (
+       select observed_at, host, service, check_name, state, message, event_key, metadata,
+              id, observed_at as source_observed_at,
+              period_rank = 1 and previous_state = 'unhealthy' as ongoing
+         from period_service_events
+        where state = 'unhealthy'
+          and (period_rank = 1 or not (
+            service in ('tunnel', 'public-media')
+            and coalesce(previous_state = 'unhealthy', false)
+            and coalesce(metadata->'monitorHeartbeat' = 'true'::jsonb, false)
+          ))
+       union all
+       select $1::timestamptz, seed.host, seed.service, seed.check_name, seed.state, seed.message,
+              seed.event_key, seed.metadata, seed.id, seed.observed_at, true
+         from service_seed seed
+        where seed.state = 'unhealthy'
+          and not exists (
+            select 1 from period_service_events current
+             where current.host = seed.host and current.service = seed.service and current.check_name = seed.check_name
+               and current.period_rank = 1
+               and (current.state = 'unhealthy' or current.observed_at = $1::timestamptz)
+          )
+     ), report_service_errors as (
+       select candidate.observed_at, candidate.service, candidate.check_name, candidate.state,
+              candidate.message, candidate.event_key,
+              case when candidate.ongoing then coalesce(candidate.metadata, '{}'::jsonb) || jsonb_build_object(
+                'ongoing', true, 'sourceObservedAt', candidate.source_observed_at,
+                'sourceEventId', candidate.id,
+                'incidentStartedAt', (
+                  select original.observed_at from observability_service_events original
+                   where original.host = candidate.host and original.service = candidate.service
+                     and original.check_name = candidate.check_name and original.state = 'unhealthy'
+                     and coalesce(original.previous_state, 'healthy') <> 'unhealthy'
+                     and (original.observed_at, original.id) <= (candidate.source_observed_at, candidate.id)
+                   order by original.observed_at desc, original.id desc limit 1
+                )
+              ) else candidate.metadata end as metadata
+         from service_error_candidates candidate
+     ), raw_errors as (
        select occurred_at, source, service, severity, impact, fingerprint, code, message,
               user_id, request_id, task_id, trace_id,
               event_key::text as sample_event_id, route as sample_route, stack as sample_stack,
@@ -381,8 +435,7 @@ async function errorRows(spec: ReportRevision) {
               state, left(message, 1000), null::uuid, null::text, null::text, null::text,
               event_key::text, null::text, null::text, 'service.health', check_name, state, state,
               null::jsonb, null::jsonb, metadata
-         from observability_service_events
-        where state = 'unhealthy' and observed_at >= $1 and observed_at < $2
+         from report_service_errors
      ), raw_errors_with_accounts as (
        select raw_errors.*,
               case when raw_errors.user_id is null then null
@@ -450,51 +503,71 @@ type ServiceRow = {
   last_observed_at: string | null;
 };
 
-async function serviceRows(spec: ReportRevision) {
-  const result = await query<ServiceRow>(
+async function serviceRows(spec: ReportRevision, client: PoolClient) {
+  const result = await client.query<ServiceRow>(
     `with seed as (
-       select distinct on (service) service, observed_at, state
+       -- Supervisor transitions explain recovery actions; periodic probes measure availability.
+       -- supervisor 仅描述恢复动作，不能覆盖周期健康探针的可用率状态。
+       select distinct on (host, service, check_name) id, host, service, check_name, observed_at, state
          from observability_service_events
-        where observed_at < $1
-        order by service, observed_at desc
+        where check_name <> 'supervisor' and observed_at < $1
+          and (observed_at >= $1::timestamptz - interval '90 seconds' or exists (
+            select 1 from observability_service_events current
+             where current.host = observability_service_events.host
+               and current.service = observability_service_events.service
+               and current.check_name = observability_service_events.check_name
+               and current.observed_at >= $1 and current.observed_at < $2
+          ))
+        order by host, service, check_name, observed_at desc, id desc
      ), scoped as (
-       select service, observed_at, state from seed
+       select * from seed
        union all
-       select service, observed_at, state
+       select id, host, service, check_name, observed_at, state
          from observability_service_events
-        where observed_at >= $1 and observed_at < $2
+        where check_name <> 'supervisor' and observed_at >= $1 and observed_at < $2
      ), transitions as (
-       select service, observed_at, state,
-              lag(state) over (partition by service order by observed_at) as previous_state,
-              lead(observed_at) over (partition by service order by observed_at) as next_observed_at
+       select *,
+              lag(state) over (partition by host, service, check_name order by observed_at, id) as previous_state,
+              lead(observed_at) over (partition by host, service, check_name order by observed_at, id) as next_observed_at
          from scoped
      ), intervals as (
-       select service, observed_at, state, previous_state,
-              greatest(observed_at, $1::timestamptz) as interval_start,
+       select *, greatest(observed_at, $1::timestamptz) as interval_start,
               least(coalesce(next_observed_at, $2::timestamptz), $2::timestamptz) as interval_end
          from transitions
-        where observed_at < $2
      ), measured as (
        select *, extract(epoch from (interval_end - interval_start)) as seconds,
               interval_end - observed_at <= interval '90 seconds' as contiguous
          from intervals
-        where interval_end > interval_start
+     ), streams as (
+       select host, service, check_name,
+              count(*) filter (where observed_at >= $1) as check_count,
+              count(*) filter (where observed_at >= $1 and state = 'healthy') as healthy_checks,
+              count(*) filter (where observed_at >= $1 and state = 'unhealthy') as unhealthy_checks,
+              count(*) filter (where observed_at >= $1 and state = 'unhealthy' and coalesce(previous_state, 'healthy') <> 'unhealthy') as incident_count,
+              coalesce(sum(seconds) filter (where contiguous and state in ('healthy', 'unhealthy')), 0) as observed_seconds,
+              coalesce(sum(seconds) filter (where contiguous and state = 'healthy'), 0) as healthy_seconds,
+              coalesce(sum(seconds) filter (where contiguous and state = 'unhealthy'), 0) as unhealthy_seconds,
+              -- Use the same freshness limit at both boundaries and between samples.
+              -- 首尾及样本间统一使用 90 秒新鲜度，unknown 不能作为有效观测。
+              min(observed_at) <= $1::timestamptz + interval '90 seconds'
+                and coalesce(bool_and(contiguous and state in ('healthy', 'unhealthy')) filter (where seconds > 0), false)
+                and coalesce(sum(seconds) filter (where contiguous and state in ('healthy', 'unhealthy')), 0)
+                  >= extract(epoch from ($2::timestamptz - $1::timestamptz)) - 90 as data_complete,
+              min(observed_at) filter (where observed_at >= $1) as first_observed_at,
+              max(observed_at) filter (where observed_at >= $1) as last_observed_at
+         from measured
+        group by host, service, check_name
      )
-     select service,
-            count(*) filter (where observed_at >= $1) as check_count,
-            count(*) filter (where observed_at >= $1 and state = 'healthy') as healthy_checks,
-            count(*) filter (where observed_at >= $1 and state = 'unhealthy') as unhealthy_checks,
-            count(*) filter (where observed_at >= $1 and state = 'unhealthy' and coalesce(previous_state, 'healthy') <> 'unhealthy') as incident_count,
-            coalesce(sum(seconds) filter (where contiguous), 0) as observed_seconds,
-            coalesce(sum(seconds) filter (where contiguous and state = 'unhealthy'), 0) as unhealthy_seconds,
-            case when sum(seconds) filter (where contiguous) > 0
-                 then sum(seconds) filter (where contiguous and state = 'healthy') / sum(seconds) filter (where contiguous)
+     select service, sum(check_count) as check_count,
+            sum(healthy_checks) as healthy_checks, sum(unhealthy_checks) as unhealthy_checks,
+            sum(incident_count) as incident_count, sum(observed_seconds) as observed_seconds,
+            sum(unhealthy_seconds) as unhealthy_seconds,
+            case when sum(observed_seconds) > 0
+                 then sum(healthy_seconds) / sum(observed_seconds)
                  else null end as availability_ratio,
-            coalesce(min(observed_at) filter (where observed_at >= $1) <= $1::timestamptz + interval '120 seconds', false)
-              and coalesce(max(observed_at) filter (where observed_at >= $1) >= $2::timestamptz - interval '120 seconds', false) as data_complete,
-            min(observed_at) filter (where observed_at >= $1) as first_observed_at,
-            max(observed_at) filter (where observed_at >= $1) as last_observed_at
-       from measured
+            bool_and(data_complete) as data_complete,
+            min(first_observed_at) as first_observed_at, max(last_observed_at) as last_observed_at
+       from streams
       group by service
       order by service`,
     [spec.periodStart.toISOString(), spec.periodEnd.toISOString()],
@@ -588,13 +661,18 @@ function reportSummary(spec: ReportRevision, accounts: ReturnType<typeof account
 }
 
 async function readReportSnapshots(spec: ReportRevision) {
-  // Keep live reads on the same query path as persisted reports so both views remain comparable.
-  // 实时视图与持久化报表复用同一套查询，确保两者口径一致。
-  const rawAccounts = await accountRows(spec);
-  const errors = await errorRows(spec);
-  const services = await serviceRows(spec);
-  const accounts = rawAccounts.map(accountSnapshot);
-  return { accounts, errors, services, summary: reportSummary(spec, accounts, errors, services) };
+  // Read one bounded database snapshot so all report sections describe the same data.
+  // 使用有超时的统一数据库快照，确保报表各部分描述同一份数据。
+  return withTransaction(async (client) => {
+    await client.query('set transaction isolation level repeatable read, read only');
+    await client.query("set local statement_timeout = '60s'");
+    await client.query("set local lock_timeout = '5s'");
+    const rawAccounts = await accountRows(spec, client);
+    const errors = await errorRows(spec, client);
+    const services = await serviceRows(spec, client);
+    const accounts = rawAccounts.map(accountSnapshot);
+    return { accounts, errors, services, summary: reportSummary(spec, accounts, errors, services) };
+  });
 }
 
 async function insertAccountSnapshots(client: PoolClient, reportRunId: string, rows: ReturnType<typeof accountSnapshot>[]) {
@@ -668,9 +746,10 @@ async function insertServiceSnapshots(client: PoolClient, reportRunId: string, r
 }
 
 export async function generateReport(spec: ReportRevision): Promise<ReportJobResult> {
-  const reportRunId = await claimReportRun(spec);
-  if (!reportRunId) return { status: 'skipped', reportType: spec.reportType, revision: spec.revision };
+  const claim = await claimReportRun(spec);
+  if (!claim) return { status: 'skipped', reportType: spec.reportType, revision: spec.revision };
 
+  const reportRunId = claim.id;
   try {
     // Run report reads sequentially so catch-up work consumes at most one shared
     // PostgreSQL connection while interactive creation requests are active.
@@ -679,7 +758,19 @@ export async function generateReport(spec: ReportRevision): Promise<ReportJobRes
     // Publish all report snapshots and the succeeded marker atomically so readers
     // can never observe a partially regenerated report.
     // 三类报表快照与成功状态必须原子发布，读取端不能看到半份重算结果。
-    await withTransaction(async (client) => {
+    const published = await withTransaction(async (client) => {
+      await client.query("set local statement_timeout = '30s'");
+      await client.query("set local lock_timeout = '5s'");
+      // Lock before publication; an insert committed during reads invalidates this snapshot.
+      // 发布前锁定任务，读取期间入库的迟到事件必须触发下一轮重算。
+      const run = await client.query<{ watermark: string; lease: string }>(
+        'select data_as_of::text as watermark, updated_at::text as lease from report_runs where id = $1 for update', [reportRunId],
+      );
+      if (run.rows[0]?.lease !== claim.lease) return false;
+      if (run.rows[0]?.watermark !== claim.watermark) {
+        await client.query("update report_runs set status = 'failed', error = null, updated_at = now() where id = $1", [reportRunId]);
+        return false;
+      }
       await client.query('delete from report_account_summaries where report_run_id = $1', [reportRunId]);
       await client.query('delete from report_error_summaries where report_run_id = $1', [reportRunId]);
       await client.query('delete from report_service_summaries where report_run_id = $1', [reportRunId]);
@@ -692,29 +783,61 @@ export async function generateReport(spec: ReportRevision): Promise<ReportJobRes
           where id = $2`,
         [JSON.stringify(summary), reportRunId],
       );
+      return true;
     });
-    return { status: 'succeeded', reportRunId, reportType: spec.reportType, revision: spec.revision };
+    return { status: published ? 'succeeded' : 'skipped', reportRunId, reportType: spec.reportType, revision: spec.revision, recomputed: claim.recomputed };
   } catch (error) {
     const message = errorMessage(error instanceof Error ? error.message : error);
     await query(
-      `update report_runs set status = 'failed', error = $1, updated_at = now() where id = $2`,
-      [message || 'report generation failed', reportRunId],
+      `update report_runs set status = 'failed', error = $1, updated_at = now() where id = $2 and updated_at::text = $3`,
+      [message || 'report generation failed', reportRunId, claim.lease],
     ).catch(() => undefined);
-    return { status: 'failed', reportRunId, reportType: spec.reportType, revision: spec.revision, error: message || 'report generation failed' };
+    return { status: 'failed', reportRunId, reportType: spec.reportType, revision: spec.revision, error: message || 'report generation failed', recomputed: claim.recomputed };
   }
 }
 
 export async function generateDueReports(now = new Date()) {
   const results: ReportJobResult[] = [];
   let generated = 0;
-  for (const spec of getDueReportJobs(now)) {
+  // Failed snapshots remain queued regardless of the ordinary catch-up horizon.
+  // 已失效快照不受常规补算时间范围限制，历史迟到事件也必须重算。
+  const pending = await query<{ report_type: ReportType; period_start: string; period_end: string; revision: number; is_final: boolean }>(
+    `select report_type, period_start, period_end, revision, is_final from report_runs
+      where status = 'failed'
+         or (status = 'running' and updated_at < now() - interval '30 minutes')
+      order by updated_at, id limit $1`, [MAX_GENERATED_REPORTS_PER_RUN],
+  );
+  const retries = pending.rows.map((row) => ({
+    reportType: row.report_type, periodStart: new Date(row.period_start), periodEnd: new Date(row.period_end),
+    revision: row.revision, isFinal: row.is_final,
+  }));
+  const due = getDueReportJobs(now);
+  const specKey = (spec: ReportRevision) => [spec.reportType, spec.periodStart.toISOString(), spec.periodEnd.toISOString(), spec.revision].join('|');
+  const existing = due.length ? await query<{ report_type: ReportType; period_start: string; period_end: string; revision: number }>(
+    `select report_type, period_start, period_end, revision from report_runs
+      where period_start >= $1 and period_start <= $2`,
+    [new Date(Math.min(...due.map((spec) => spec.periodStart.getTime()))).toISOString(),
+      new Date(Math.max(...due.map((spec) => spec.periodStart.getTime()))).toISOString()],
+  ) : { rows: [] };
+  const existingKeys = new Set(existing.rows.map((row) => specKey({
+    reportType: row.report_type, periodStart: new Date(row.period_start), periodEnd: new Date(row.period_end),
+    revision: row.revision, isFinal: false,
+  })));
+  const queues = [due.filter((spec) => !existingKeys.has(specKey(spec))), retries];
+  let queueIndex = 0;
+  // Alternate actual attempts; only a claim skipped before any report reads is free.
+  // 新任务与历史重试交替占实际额度，仅未领取任务的跳过不计预算。
+  while (queues.some((queue) => queue.length) && generated < MAX_GENERATED_REPORTS_PER_RUN) {
+    const spec = queues[queueIndex].shift();
+    if (!spec) {
+      queueIndex = 1 - queueIndex;
+      continue;
+    }
     const result = await generateReport(spec);
     results.push(result);
-    if (result.status !== 'skipped') generated += 1;
-    // Keep catch-up work bounded so a missed scheduler window cannot overload
-    // PostgreSQL or compete with active creative requests.
-    // 限制单轮补算数量，避免调度中断后一次性抢占数据库和创作请求资源。
-    if (generated >= MAX_GENERATED_REPORTS_PER_RUN) break;
+    if (result.status === 'skipped' && !result.reportRunId) continue;
+    generated += 1;
+    queueIndex = 1 - queueIndex;
   }
   return results;
 }
@@ -787,7 +910,7 @@ export async function listReportRuns(limitPerType = 30, filters: ReportRunFilter
       "        or report_type::text ilike $" + rawIndex,
       "        or (case report_type when 'daily' then '日报' when 'weekly' then '周报' when 'monthly' then '月报' end) ilike $" + rawIndex,
       "        or status::text ilike $" + rawIndex,
-      "        or (case when status = 'running' then '生成中 running' when status = 'failed' then '失败待重试 failed' when is_final then '最终版 final' else '临时版 draft' end) ilike $" + rawIndex,
+      "        or (case when status = 'running' then '生成中 running' when status = 'failed' and error is null then '待重算 queued' when status = 'failed' then '失败待重试 failed' when is_final then '最终版 final' else '临时版 draft' end) ilike $" + rawIndex,
       "      )",
     ].join("\n"));
   }
@@ -814,47 +937,54 @@ export async function listReportRuns(limitPerType = 30, filters: ReportRunFilter
 }
 
 export async function getReportDetails(reportRunId: string) {
-  const runSql = [
-    "select id, report_type, period_start, period_end, revision, status, is_final,",
-    "       data_as_of, schema_version, summary, error, created_at, updated_at",
-    "  from report_runs where id = $1",
-  ].join("\n");
-  const run = await query<ReportRunRecord>(runSql, [reportRunId]);
-  if (!run.rows[0]) return null;
-  const [accountSnapshotResult, errorSnapshotResult, services] = await Promise.all([
-    query<AccountRow>("select * from report_account_summaries where report_run_id = $1 order by reserved_cost_usd desc, usage_calls desc, account_email", [reportRunId]),
-    query<ErrorRow>("select * from report_error_summaries where report_run_id = $1 order by occurrences desc, last_occurred_at desc", [reportRunId]),
-    query("select * from report_service_summaries where report_run_id = $1 order by service", [reportRunId]),
-  ]);
-  const accounts = accountSnapshotResult.rows.map(accountSnapshot);
-  let errors = errorSnapshotResult.rows;
-  const reportRun = run.rows[0];
-  const needsErrorLookup = errors.some((row) => (
-    numberValue(row.affected_accounts) > 0 && errorAccountEmails(row).length === 0
-  ) || !errorSample(row));
-  if (needsErrorLookup) {
-    const currentErrorRows = await errorRows({
-      reportType: reportRun.report_type,
-      periodStart: new Date(reportRun.period_start),
-      periodEnd: new Date(reportRun.period_end),
-      revision: reportRun.revision,
-      isFinal: reportRun.is_final,
-    });
-    const currentErrorsByKey = new Map(currentErrorRows.map((row) => [errorGroupKey(row), row]));
-    errors = errors.map((row) => {
-      const current = currentErrorsByKey.get(errorGroupKey(row));
-      if (!current) return row;
-      const emails = errorAccountEmails(row).length ? errorAccountEmails(row) : errorAccountEmails(current);
-      const sample = errorSample(row) || errorSample(current);
-      const metadata = recordValue(row.metadata) || {};
-      return {
-        ...row,
-        ...(emails.length ? { affected_account_emails: emails } : {}),
-        ...(row.sample || sample ? { sample: row.sample || sample } : {}),
-        ...(row.sample_trace_id || !current.sample_trace_id ? {} : { sample_trace_id: current.sample_trace_id }),
-        ...(sample && !metadata.sample ? { metadata: { ...metadata, sample } } : {}),
-      };
-    });
-  }
-  return { run: reportRun, accounts, errors, services: services.rows };
+  // Read the run marker and all summaries from one snapshot across atomic regeneration.
+  // 重算原子发布期间，任务状态与三类汇总必须从同一快照读取。
+  return withTransaction(async (client) => {
+    await client.query('set transaction isolation level repeatable read, read only');
+    await client.query("set local statement_timeout = '60s'");
+    await client.query("set local lock_timeout = '5s'");
+    const runSql = [
+      "select id, report_type, period_start, period_end, revision, status, is_final,",
+      "       data_as_of, schema_version, summary, error, created_at, updated_at",
+      "  from report_runs where id = $1",
+    ].join("\n");
+    const run = await client.query<ReportRunRecord>(runSql, [reportRunId]);
+    if (!run.rows[0]) return null;
+    const [accountSnapshotResult, errorSnapshotResult, services] = await Promise.all([
+      client.query<AccountRow>("select * from report_account_summaries where report_run_id = $1 order by reserved_cost_usd desc, usage_calls desc, account_email", [reportRunId]),
+      client.query<ErrorRow>("select * from report_error_summaries where report_run_id = $1 order by occurrences desc, last_occurred_at desc", [reportRunId]),
+      client.query("select * from report_service_summaries where report_run_id = $1 order by service", [reportRunId]),
+    ]);
+    const accounts = accountSnapshotResult.rows.map(accountSnapshot);
+    let errors = errorSnapshotResult.rows;
+    const reportRun = run.rows[0];
+    const needsErrorLookup = errors.some((row) => (
+      numberValue(row.affected_accounts) > 0 && errorAccountEmails(row).length === 0
+    ) || !errorSample(row));
+    if (needsErrorLookup) {
+      const currentErrorRows = await errorRows({
+        reportType: reportRun.report_type,
+        periodStart: new Date(reportRun.period_start),
+        periodEnd: new Date(reportRun.period_end),
+        revision: reportRun.revision,
+        isFinal: reportRun.is_final,
+      }, client);
+      const currentErrorsByKey = new Map(currentErrorRows.map((row) => [errorGroupKey(row), row]));
+      errors = errors.map((row) => {
+        const current = currentErrorsByKey.get(errorGroupKey(row));
+        if (!current) return row;
+        const emails = errorAccountEmails(row).length ? errorAccountEmails(row) : errorAccountEmails(current);
+        const sample = errorSample(row) || errorSample(current);
+        const metadata = recordValue(row.metadata) || {};
+        return {
+          ...row,
+          ...(emails.length ? { affected_account_emails: emails } : {}),
+          ...(row.sample || sample ? { sample: row.sample || sample } : {}),
+          ...(row.sample_trace_id || !current.sample_trace_id ? {} : { sample_trace_id: current.sample_trace_id }),
+          ...(sample && !metadata.sample ? { metadata: { ...metadata, sample } } : {}),
+        };
+      });
+    }
+    return { run: reportRun, accounts, errors, services: services.rows };
+  });
 }

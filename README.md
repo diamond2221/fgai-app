@@ -125,15 +125,15 @@ scripts/install-auto-deploy.sh
 
 项目系统版本维护在 `lib/version.ts` 的 `SYSTEM_VERSION`，这是用于强制升级判断的三段式 semver，必须由代码变更人工递增；每次发布新版本必须同步更新 `package.json` 的 `version`、`SYSTEM_VERSION`、`fg-release-notes.ts` 的 `CURRENT_RELEASE_VERSION`，并新增对应版本的中文更新说明。例如将 `1.0.0` 改为 `1.0.1` 后提交并推送，自动部署完成即提高最低可用版本，自动部署不会修改它。所有页面右下角会展示系统版本和部署版本，`/api/version` 返回两者及当前要求的系统版本。旧页面会立即检查并每 60 秒复查；检测到当前页面系统版本低于服务端要求时会阻断页面并提示刷新升级。版本接口暂时不可用时页面放行，避免诊断链路故障阻断正常使用。
 
-每次自动重建 `app` 前，脚本会先将当前容器的完整 stdout/stderr 归档到宿主机 `$HOME/Library/Logs/fg-studio-app/`，文件名包含 UTC 时间、容器 ID 和提交 SHA；新容器启动失败时也会先归档失败容器日志，再执行回滚。该目录不随容器删除，使用 `pnpm logs:app:history` 查看历史归档文件。
+正常部署、回滚和 NAS 重建 `app` 时，脚本在持有重建锁后先通过 `docker logs --follow --timestamps` 跟随旧容器 stdout/stderr，再替换容器，避免遗漏替换前的最后日志。首条完整时间戳日志或正常 EOF 用于确认跟随；无日志容器通过受限日志查询、同容器运行状态和跟随进程存活复核，无法确认时推迟替换。空日志复核属于 best-effort，Docker CLI 不提供空流连接确认。归档 CLI 最长运行 150 秒，重建 CLI 最长运行 120 秒，仅清理本次启动的进程；重建超时不能证明 Docker daemon 的操作已结束，脚本保留日志和状态告警，本轮不再盲目回滚或降级替换。日志先写私有临时文件，再原子发布到宿主机 `$HOME/Library/Logs/fg-studio-app/`；异常或超时捕获的完整行保留为 `*-partial.log`，并输出警告。新容器启动失败时也会归档失败容器日志。监控按独立游标补采错误；该目录不随容器删除，使用 `pnpm logs:app:history` 查看历史归档文件。
 
 执行 `pnpm logs:deploy` 可同时跟随自动部署的标准与错误日志。部署主机必须能够访问 Git remote；私有仓库的 Git 凭据应配置在该主机的 Git credential helper 或 SSH agent 中，不要写入仓库或 `.env.docker`。
 
-服务器网络如果封锁 UDP/7844，Compose 会强制 `cloudflared` 使用 HTTP/2，避免 Tunnel 自动切换到不可用的 QUIC。修改 Tunnel 配置后执行 `docker compose --env-file .env.docker up -d cloudflared` 使连接重新建立。
+服务器网络如果封锁 UDP/7844，Compose 会强制 `cloudflared` 使用 HTTP/2，避免 Tunnel 自动切换到不可用的 QUIC。Tunnel 的 Compose 配置变更必须在明确授权的维护操作中重建容器后生效；单纯 `restart` 不会更新已有容器的 healthcheck，监控不会主动重建或重启隧道。
 
 ### 服务监控与告警
 
-Docker 主机使用统一 LaunchAgent 每 30 秒检查 Docker、NAS、App HTTP、PostgreSQL、Cloudflare Tunnel、系统磁盘和 App 新增 `error/fail` 日志。Tunnel 监控同时检查本地 connector 和 `PROVIDER_MEDIA_URL` 公网媒体地址，避免把“进程存活”误判为“Wetoken 可下载素材”；连续 2 次失败后自动重启 connector，并在 5 分钟冷却窗口内抑制重复重启。App 异常由 NAS supervisor 重建，PostgreSQL 连续 3 次 unhealthy 后自动重启；Docker Desktop 不可用时会请求 macOS 启动。所有容器使用 Docker `local` logging driver，单文件上限 20 MB、最多保留 10 个轮转文件。
+Docker 主机使用统一 LaunchAgent 每 30 秒检查 Docker、NAS、App HTTP、PostgreSQL、Cloudflare Tunnel、系统磁盘和 App 新增 `error/fail` 日志。`tunnel` 单独记录 connector 就绪状态，`public-media` 单独探测 `PROVIDER_MEDIA_URL`；连续 2 次失败后分别告警，公网超时不会被归因为 connector 断开，也不会触发隧道重启。隧道与公网媒体在健康和异常状态下均保留采样心跳，通过持久 outbox 投递；日志页面隐藏这两类服务明确标记的重复异常心跳，告警仅在状态变化时触发。监控 Docker CLI 调用最多等待 5 秒，公网探针验证 TLS；仅 2xx 或无参数媒体内容接口的预期 400 算可达。入队失败保留状态并继续其他检查。App 错误合并 stdout/stderr 后按容器游标采集到 outbox，归档每轮补采一份、最多 100 行。不同事件队列轮换投递，失败事件轮到队尾，明确的载荷拒绝保存到本地 quarantine；新 API 协议就绪前保留队列。App 异常由 NAS supervisor 重建，PostgreSQL 连续 3 次 unhealthy 后自动重启；Docker Desktop 不可用时会请求 macOS 启动。所有容器使用 Docker `local` logging driver，单文件上限 20 MB、最多保留 10 个轮转文件。
 
 服务监控在检查 Docker 前，会重新注册已安装但被卸载的 NAS LaunchAgent；显式禁用的任务不会被重新启用。服务监控与报表调度使用系统文件锁，进程退出后自动释放，不再因遗留目录锁永久跳过检查。**未经用户明确、强制要求，绝不能主动停止生产守护进程**，包括通过安装、重载或排障脚本间接停止；受保护任务清单及命令限制统一见 [AGENTS.md](AGENTS.md#生产守护进程保护硬性约束)。
 

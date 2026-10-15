@@ -1,4 +1,5 @@
 import Link from "next/link";
+import dayjs from "dayjs";
 import type { ReactNode } from "react";
 import type { getLiveTodayReport, getReportDetails, ReportRunRecord } from "@/lib/observability/reporting";
 
@@ -122,13 +123,24 @@ function compactReportPeriod(run: ReportRunRecord) {
   return compactDate(run.period_start) + " — " + compactDate(run.period_end);
 }
 
+function hasSnapshot(run: ReportRunRecord) {
+  return Boolean(run.summary && typeof run.summary === "object" && !Array.isArray(run.summary)
+    && Object.keys(run.summary).length > 0);
+}
+
+function isPendingRefresh(run: ReportRunRecord) {
+  return run.status === "failed" && !run.error && hasSnapshot(run);
+}
+
 function statusLabel(run: ReportRunRecord) {
   if (run.status === "succeeded") return run.is_final ? "最终版" : "临时版";
-  if (run.status === "running") return "生成中";
+  if (isPendingRefresh(run)) return "待重算";
+  if (run.status === "running") return hasSnapshot(run) ? "重算中" : "生成中";
   return "失败待重试";
 }
 
 function statusTone(run: ReportRunRecord): ReportStatusTone {
+  if (isPendingRefresh(run)) return "running";
   if (run.status === "failed") return "failed";
   if (run.status === "running") return "running";
   return run.is_final ? "final" : "draft";
@@ -210,11 +222,24 @@ function errorLogHref(run: ReportRunRecord, item: ErrorSnapshot) {
     || item.code
     || item.message;
   const params = new URLSearchParams();
-  const from = isoText(run.period_start);
-  const to = isoText(run.period_end);
+  const metadata = recordValue(item.metadata);
+  const ongoing = metadata?.ongoing === true || sample?.ongoing === true;
+  const incidentStart = isoText(metadata?.incidentStartedAt || sample?.incidentStartedAt
+    || metadata?.sourceObservedAt || sample?.sourceObservedAt);
+  const sourceTime = isoText(item.last_occurred_at || metadata?.sourceObservedAt || sample?.sourceObservedAt);
+  const to = ongoing && sourceTime ? dayjs(sourceTime).add(1, "second").toISOString() : isoText(run.period_end);
+  let from = ongoing && incidentStart ? dayjs(incidentStart).subtract(1, "second").toISOString() : isoText(run.period_start);
+  if (ongoing && from && to && dayjs(to).isAfter(dayjs(from).add(3, "month"))) {
+    // Stay within the explorer's calendar-month limit for long-running incidents.
+    // 长期持续故障限制在日志检索允许的三个自然月内，避免跳转后查询报错。
+    let earliest = dayjs(to).subtract(3, "month");
+    if (earliest.add(3, "month").isBefore(dayjs(to))) earliest = earliest.add(3, "day");
+    from = earliest.toISOString();
+  }
   if (from) params.set("from", from);
   if (to) params.set("to", to);
-  if (lookup) params.set("q", lookup);
+  if (ongoing) params.set("q", "service:" + JSON.stringify(item.service));
+  else if (lookup) params.set("q", lookup);
   return "/admin/logs?" + params.toString();
 }
 
@@ -232,6 +257,7 @@ function SampleData({ label, value }: { label: string; value: unknown }) {
 
 function ErrorChain({ run, item, accountCount }: { run: ReportRunRecord; item: ErrorSnapshot; accountCount: number }) {
   const sample = errorSample(item);
+  const ongoing = recordValue(item.metadata)?.ongoing === true || sample?.ongoing === true;
   const actor = sampleText(sample, ["actorEmail", "actorId"]) || (accountCount ? "受影响账户" : "未关联账户");
   const sampleTime = sampleText(sample, ["occurredAt"]) || item.last_occurred_at;
   const feature = sampleText(sample, ["feature"]) || item.service;
@@ -239,7 +265,7 @@ function ErrorChain({ run, item, accountCount }: { run: ReportRunRecord; item: E
   return <div className="observability-error-chain">
     <div className="observability-error-chain__top">
       <strong title={actor}>{actor}</strong>
-      <Link href={errorLogHref(run, item)} className="observability-error-chain__link">查看日志</Link>
+      <Link href={errorLogHref(run, item)} className="observability-error-chain__link" title={ongoing ? "持续故障按服务查看日志，最多覆盖三个自然月" : undefined}>查看日志</Link>
     </div>
     <div className="observability-error-chain__meta"><span>{dateText(sampleTime)}</span><span title={feature}>{feature}</span>{action ? <span title={action}>{action}</span> : null}</div>
     <details className="observability-error-chain__details">
@@ -393,6 +419,7 @@ export default function ObservabilityReportView({ runs, detail, liveToday, error
   const services = (detail?.services || []) as ServiceSnapshot[];
   const selectedMeta = detail ? REPORT_META[detail.run.report_type] : null;
   const isLiveToday = detail?.run.id === "live-today";
+  const resultPending = Boolean(detail && detail.run.status !== "succeeded" && hasSnapshot(detail.run));
   const selectedTone = detail ? (isLiveToday ? "running" : statusTone(detail.run)) : null;
 
   return <main className="observability-report">
@@ -421,7 +448,7 @@ export default function ObservabilityReportView({ runs, detail, liveToday, error
         <span className="fg-mono observability-kicker">SELECT A REPORT</span>
         <h2>选择一份报表</h2>
         <p>从上方周期入口打开账户、错误和服务明细。</p>
-      </section> : detail.run.status !== "succeeded" ? <section className="observability-report__empty observability-report__empty--warning">
+      </section> : detail.run.status !== "succeeded" && !hasSnapshot(detail.run) ? <section className="observability-report__empty observability-report__empty--warning">
         <span className="fg-mono observability-kicker">REPORT NOT READY</span>
         <h2>该报表尚未成功生成</h2>
         <p>{detail.run.error || "scheduler 会自动重试失败任务。"}</p>
@@ -431,11 +458,11 @@ export default function ObservabilityReportView({ runs, detail, liveToday, error
             <div>
               <span className="fg-mono observability-kicker">{isLiveToday ? "LIVE / TODAY" : selectedMeta?.kicker + " / REVISION R" + detail.run.revision}</span>
               <h2>{isLiveToday ? "今日实时汇总" : <>{selectedMeta?.label} <span>·</span> {detail.run.is_final ? "最终版" : "临时版"}</>}</h2>
-              <p>周期：{reportPeriod(detail.run)}；数据截至：{dateText(detail.run.data_as_of)}{isLiveToday ? "；只读实时汇总，刷新页面更新" : ""}</p>
+              <p>周期：{reportPeriod(detail.run)}{resultPending ? "；迟到数据待更新，当前展示上一份结果" : "；数据截至：" + dateText(detail.run.data_as_of)}{isLiveToday ? "；只读实时汇总，刷新页面更新" : ""}</p>
             </div>
             <div className={"observability-report__state observability-report__state--" + selectedTone}>
               <i aria-hidden="true" />
-              <span>{isLiveToday ? "实时读取 · 刷新页面更新" : detail.run.is_final ? "数据已结算" : "等待迟到任务和费用补齐"}</span>
+              <span>{isLiveToday ? "实时读取 · 刷新页面更新" : resultPending ? statusLabel(detail.run) : detail.run.is_final ? "数据已结算" : "等待迟到任务和费用补齐"}</span>
             </div>
           </div>
           <div className="observability-report__meta">

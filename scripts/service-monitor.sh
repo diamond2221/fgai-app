@@ -10,13 +10,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${FG_MONITOR_ENV_FILE:-$PROJECT_ROOT/.env.docker}"
 STATE_ROOT="${FG_MONITOR_STATE_DIR:-$HOME/Library/Application Support/fg-studio-monitor}"
 LOG_ROOT="${FG_MONITOR_LOG_DIR:-$HOME/Library/Logs/fg-studio-monitor}"
+APP_LOG_ROOT="${FG_APP_LOG_DIR:-$HOME/Library/Logs/fg-studio-app}"
 LOCK_FILE="$STATE_ROOT/monitor.lock"
 DISK_THRESHOLD="${FG_MONITOR_DISK_THRESHOLD:-90}"
-MAX_APP_ERROR_LINES_PER_RUN="${FG_MONITOR_MAX_APP_ERROR_LINES_PER_RUN:-200}"
-MAX_APP_ERROR_EVENTS_PER_RUN="${FG_MONITOR_MAX_APP_ERROR_EVENTS_PER_RUN:-20}"
+DOCKER_TIMEOUT_SECONDS=5
 MAX_OBSERVABILITY_EVENTS_PER_RUN="${FG_MONITOR_MAX_OBSERVABILITY_EVENTS_PER_RUN:-5}"
 TUNNEL_FAILURE_THRESHOLD="${FG_MONITOR_TUNNEL_FAILURE_THRESHOLD:-2}"
-TUNNEL_RESTART_COOLDOWN_SECONDS="${FG_MONITOR_TUNNEL_RESTART_COOLDOWN_SECONDS:-300}"
 TUNNEL_PROBE_TIMEOUT_SECONDS="${FG_MONITOR_TUNNEL_PROBE_TIMEOUT_SECONDS:-8}"
 USER_DOMAIN="gui/$(id -u)"
 AUTO_DEPLOY_LABEL="com.fgstudio.auto-deploy"
@@ -86,39 +85,35 @@ send_monitor_event() {
   local state="$2"
   local previous="$3"
   local message="$4"
-  local secret
-  local endpoint
-  local base_url
-  local host
-  local event_key
-  local payload
+  local host observed_at event_key payload
+  local heartbeat=false
+  host="$(hostname -s 2>/dev/null || hostname)"
+  observed_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  event_key="monitor-${host}-${service}-$(/usr/bin/uuidgen)"
+  [[ "$service" == "tunnel" || "$service" == "public-media" ]] && [[ "$state" == "unhealthy" && "$previous" == "$state" ]] && heartbeat=true
+  # Queue before advancing state; retries retain the observation time and event identity.
+  # 状态推进前持久化采样，重试保留原始采样时间和事件标识。
+  payload="{\"observedAt\":\"$observed_at\",\"host\":\"$(json_escape "$host")\",\"service\":\"$(json_escape "$service")\",\"checkName\":\"health\",\"state\":\"$(json_escape "$state")\",\"previousState\":\"$(json_escape "$previous")\",\"message\":\"$(json_escape "$message")\",\"eventKey\":\"$(json_escape "$event_key")\",\"metadata\":{\"monitorHeartbeat\":$heartbeat}}"
+  if [[ "$service" == "tunnel" || "$service" == "public-media" ]]; then
+    fg_obs_queue_event monitor "$payload"
+    return
+  fi
+  local secret base_url
   secret="$(observability_secret)"
   [[ -n "$secret" ]] || return 0
   base_url="$(read_env_value FG_OBSERVABILITY_URL)"
   base_url="${base_url:-$(app_base_url)}"
-  endpoint="${base_url%/}/api/observability/monitor-events"
-  host="$(hostname -s 2>/dev/null || hostname)"
-  event_key="monitor-${host}-${service}-$(date -u '+%Y%m%dT%H%M%SZ')"
-  payload="{\"host\":\"$(json_escape "$host")\",\"service\":\"$(json_escape "$service")\",\"checkName\":\"health\",\"state\":\"$(json_escape "$state")\",\"previousState\":\"$(json_escape "$previous")\",\"message\":\"$(json_escape "$message")\",\"eventKey\":\"$(json_escape "$event_key")\"}"
   (
     /usr/bin/curl -fsS --connect-timeout 1 --max-time 2 \
       -H "x-fg-observability-secret: $secret" -H 'Content-Type: application/json' \
-      -d "$payload" "$endpoint" >/dev/null 2>&1 || true
+      -d "$payload" "${base_url%/}/api/observability/monitor-events" >/dev/null 2>&1 || true
   ) &
 }
 
 send_app_error_event() {
   local line="$1"
-  local secret
-  local endpoint
-  local base_url
   local event_key
   local payload
-  secret="$(observability_secret)"
-  [[ -n "$secret" ]] || return 0
-  base_url="$(read_env_value FG_OBSERVABILITY_URL)"
-  base_url="${base_url:-$(app_base_url)}"
-  endpoint="${base_url%/}/api/observability/error-events"
   if command -v node >/dev/null 2>&1; then
     # Parse the structured application line once so the error event keeps the
     # original trace, task, route and HTTP status instead of a generic summary.
@@ -177,7 +172,7 @@ send_app_error_event() {
         metadata: { appLog: value },
       };
       process.stdout.write(JSON.stringify(payload));
-    ' || true)"
+    ')" || return 1
   else
     local occurred_at="${line%% *}"
     local message
@@ -186,12 +181,8 @@ send_app_error_event() {
     event_key="$(printf '%s' "$line" | /usr/bin/shasum -a 256 | awk '{print "app-log-" $1}')"
     payload="{\"occurredAt\":\"$(json_escape "$occurred_at")\",\"source\":\"app\",\"service\":\"app\",\"severity\":\"error\",\"impact\":\"unknown\",\"code\":\"app_log\",\"message\":\"$(json_escape "$message")\",\"eventKey\":\"$(json_escape "$event_key")\"}"
   fi
-  [[ -n "$payload" ]] || return 0
-  (
-    /usr/bin/curl -fsS --connect-timeout 1 --max-time 2 \
-      -H "x-fg-observability-secret: $secret" -H 'Content-Type: application/json' \
-      -d "$payload" "$endpoint" >/dev/null 2>&1 || true
-  ) &
+  [[ -n "$payload" ]] || return 1
+  fg_obs_queue_event error "$payload"
 }
 
 structured_app_error_lines() {
@@ -238,7 +229,7 @@ structured_app_error_lines() {
     rescue JSON::ParserError
       puts line if line.match?(/\b(error|failed|failure|fatal|panic|exception)\b/i)
     end
-  ' || true
+  '
 }
 
 send_alert() {
@@ -271,7 +262,14 @@ update_state() {
   local state_file="$STATE_ROOT/$service.state"
   local previous=""
   [[ -f "$state_file" ]] && previous="$(<"$state_file")"
-  [[ "$previous" == "$next" && "$emit_repeated" != "true" ]] || send_monitor_event "$service" "$next" "$previous" "$message"
+  # Retain unhealthy samples for availability accounting; only their log presentation is deduplicated.
+  # 保留异常心跳用于可用率统计；重复异常仅在日志展示层去重。
+  if [[ "$service" == "tunnel" || "$service" == "public-media" || "$previous" != "$next" || "$emit_repeated" == "true" ]]; then
+    if ! send_monitor_event "$service" "$next" "$previous" "$message"; then
+      log "Monitor: observability enqueue failed for $service; keeping previous state for retry"
+      return 0
+    fi
+  fi
   [[ "$previous" == "$next" ]] && return 0
   printf '%s' "$next" > "$state_file"
   log "Monitor: $service $next - $message"
@@ -295,16 +293,41 @@ clear_failures() {
   rm -f "$STATE_ROOT/$1.failures"
 }
 
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  # Isolate only this CLI process tree; never signal Docker or container services.
+  # 只隔离并终止本次 CLI 进程树，超时不得停止 Docker daemon 或容器服务。
+  /usr/bin/python3 -c '
+import os, signal, subprocess, sys
+process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+try:
+    sys.exit(process.wait(timeout=float(sys.argv[1])))
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    sys.exit(124)
+' "$timeout_seconds" "$@"
+}
+
+monitor_docker() {
+  run_with_timeout "$DOCKER_TIMEOUT_SECONDS" docker "$@"
+}
+
 compose() {
   local compose_profile
   compose_profile="$(read_env_value FG_COMPOSE_PROFILE)"
   if [[ -n "$compose_profile" ]]; then
-    docker compose --project-directory "$PROJECT_ROOT" --project-name fgai-app --env-file "$ENV_FILE" --profile "$compose_profile" "$@"
+    monitor_docker compose --project-directory "$PROJECT_ROOT" --project-name fgai-app --env-file "$ENV_FILE" --profile "$compose_profile" "$@"
     return
   fi
   # Do not expand an empty Bash array under nounset when HTTPS is disabled.
   # 未启用 HTTPS 时不展开空 Bash array，避免 nounset 导致监控脚本失败。
-  docker compose --project-directory "$PROJECT_ROOT" --project-name fgai-app --env-file "$ENV_FILE" "$@"
+  monitor_docker compose --project-directory "$PROJECT_ROOT" --project-name fgai-app --env-file "$ENV_FILE" "$@"
 }
 
 container_id() {
@@ -383,7 +406,7 @@ check_app() {
   local health="missing"
   local http_status
   container="$(container_id app)"
-  [[ -n "$container" ]] && health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
+  [[ -n "$container" ]] && health="$(monitor_docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
   # Probe a lightweight public endpoint instead of rendering the homepage, so monitoring measures app readiness rather than page cost.
   # 使用无需登录的轻量接口，监控应用是否就绪，而不是把首页渲染耗时误判为服务异常。
   http_status="$(/usr/bin/curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$(app_base_url)/api/version" 2>/dev/null || printf 'unreachable')"
@@ -405,7 +428,7 @@ check_nginx() {
   compose_profile="$(read_env_value FG_COMPOSE_PROFILE)"
   [[ "$compose_profile" == "https" ]] || return 0
   container="$(container_id nginx)"
-  [[ -n "$container" ]] && health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
+  [[ -n "$container" ]] && health="$(monitor_docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
   nginx_host_port="$(read_env_value FG_NGINX_HOST_PORT)"
   [[ "$nginx_host_port" =~ ^[0-9]+$ ]] || nginx_host_port=3000
   http_status="$(/usr/bin/curl -ksS -o /dev/null -w '%{http_code}' --max-time 5 "https://127.0.0.1:$nginx_host_port/api/version" 2>/dev/null || printf 'unreachable')"
@@ -434,7 +457,7 @@ check_nginx_5xx() {
   host="$(hostname -s 2>/dev/null || hostname)"
   # Stream Docker output so a long outage cannot load the full rotated log window into memory.
   # 逐行处理 Docker 输出，避免长时间中断后将整段轮转日志一次性载入内存。
-  if ! docker logs --since "$cursor" --timestamps "$container" 2>/dev/null | /usr/bin/ruby -rjson -rdigest -e '
+  if ! monitor_docker logs --since "$cursor" --timestamps "$container" 2>/dev/null | /usr/bin/ruby -rjson -rdigest -e '
     host = ARGV.fetch(0)
     STDIN.each_line do |line|
       match = line.match(/\A(\S+)\s+(\{.*\})\s*\z/)
@@ -510,7 +533,7 @@ check_postgres() {
   local health="missing"
   local count
   container="$(container_id postgres)"
-  [[ -n "$container" ]] && health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
+  [[ -n "$container" ]] && health="$(monitor_docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
   if [[ "$health" == "healthy" ]]; then
     clear_failures postgres
     update_state postgres healthy "pg_isready health check passed"
@@ -528,71 +551,68 @@ check_postgres() {
 check_tunnel() {
   local container
   local provider_url
-  local ready_state="not-ready"
-  local probe_status="not-run"
+  local ready_output=""
+  local ready_invalid=false
+  local container_present=false
+  local ready_exit=1
+  local probe_status
+  local probe_exit=0
   local count
-  local now
-  local last_restart=0
-  local restart_elapsed
 
   [[ "$TUNNEL_FAILURE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] || TUNNEL_FAILURE_THRESHOLD=2
-  [[ "$TUNNEL_RESTART_COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]] || TUNNEL_RESTART_COOLDOWN_SECONDS=300
   [[ "$TUNNEL_PROBE_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || TUNNEL_PROBE_TIMEOUT_SECONDS=8
 
   container="$(container_id cloudflared)"
-  if [[ -n "$container" ]] && docker exec "$container" cloudflared tunnel --metrics 127.0.0.1:20241 ready >/dev/null 2>&1; then
-    ready_state="ready"
+  if [[ -n "$container" ]]; then
+    container_present=true
+    # Capture CLI output because invalid flag order can print usage and exit successfully.
+    # 捕获 CLI 输出，避免参数顺序错误时打印 usage 却返回成功造成假健康。
+    ready_exit=0
+    ready_output="$(monitor_docker exec "$container" cloudflared tunnel --metrics 127.0.0.1:20241 ready 2>&1)" || ready_exit=$?
+  fi
+  if [[ "$ready_output" =~ [Ii]ncorrect[[:space:]][Uu]sage|[Uu][Ss][Aa][Gg][Ee]:|[Uu]nknown[[:space:]]flag|flag[[:space:]]provided[[:space:]]but[[:space:]]not[[:space:]]defined ]]; then
+    ready_invalid=true
+    ready_exit=1
+  fi
+
+  if [[ "$ready_exit" == "0" ]]; then
+    clear_failures tunnel
+    update_state tunnel healthy "Cloudflare connector is ready"
+  else
+    count="$(failure_count tunnel)"
+    if ((count >= TUNNEL_FAILURE_THRESHOLD)); then
+      update_state tunnel unhealthy "Cloudflare connector not ready; container-present=$container_present; exit=$ready_exit; invalid-cli=$ready_invalid; consecutive failures=$count" false
+    fi
   fi
 
   provider_url="$(read_env_value PROVIDER_MEDIA_URL)"
-  if [[ -n "$container" ]] && [[ -n "$provider_url" ]]; then
-    # `cloudflared tunnel ready` only verifies the local connector process. The
-    # public media URL must also answer, otherwise Wetoken cannot download a
-    # reference even while Docker reports the tunnel as healthy.
-    # `cloudflared tunnel ready` 只能证明本地进程存在；还必须探测公网媒体地址，
-    # 否则 Docker 显示 healthy 时，Wetoken 仍可能拿不到参考素材。
-    probe_status="$(/usr/bin/curl -ksS -o /dev/null -w '%{http_code}' \
-      --connect-timeout 3 --max-time "$TUNNEL_PROBE_TIMEOUT_SECONDS" \
-      "$provider_url" 2>/dev/null || true)"
-    if [[ "$probe_status" =~ ^[1-4][0-9]{2}$ ]]; then
-      clear_failures tunnel
-      update_state tunnel healthy "public media probe HTTP $probe_status; connector=$ready_state"
-      return
-    fi
-  elif [[ -n "$container" ]] && [[ "$ready_state" == "ready" ]]; then
-    clear_failures tunnel
-    update_state tunnel healthy "Cloudflare connector is ready"
+  if [[ -z "$provider_url" ]]; then
+    clear_failures public-media
+    update_state public-media unknown "PROVIDER_MEDIA_URL is not configured; public reachability was not checked" false
     return
   fi
 
-  count="$(failure_count tunnel)"
+  # Public reachability includes host egress, DNS and TLS; it cannot justify restarting a ready connector.
+  # 公网可达性还受主机出口、DNS 和 TLS 影响；探测失败只告警，禁止主动重启 connector。
+  probe_status="$(/usr/bin/curl -sS -o /dev/null -w '%{http_code}' \
+    --connect-timeout 3 --max-time "$TUNNEL_PROBE_TIMEOUT_SECONDS" \
+    "$provider_url" 2>/dev/null)" || probe_exit=$?
+  # Only the unsigned bare content endpoint intentionally returns 400 for missing parameters.
+  # 只有未带参数的裸 content 接口预期返回 400；鉴权、限流和路由错误不能算健康。
+  local expected_bad_request=false
+  [[ "$provider_url" =~ ^https?://[^/]+/api/local/storage/content/?$ ]] && expected_bad_request=true
+  if ((probe_exit == 0)) && { [[ "$probe_status" =~ ^2[0-9]{2}$ ]] || [[ "$probe_status" == "400" && "$expected_bad_request" == true ]]; }; then
+    clear_failures public-media
+    update_state public-media healthy "public media probe HTTP $probe_status"
+    return
+  fi
+
+  count="$(failure_count public-media)"
   if ((count < TUNNEL_FAILURE_THRESHOLD)); then
-    # A single public probe timeout is inconclusive while the connector remains ready.
-    # Connector 仍就绪时，单次公网探测超时不足以判定 Tunnel 故障。
-    log "Monitor: tunnel probe pending - connector=$ready_state; public media HTTP=$probe_status; consecutive failures=$count"
+    log "Monitor: public media probe pending - curl exit=$probe_exit; HTTP=${probe_status:-unknown}; consecutive failures=$count"
     return
   fi
-  update_state tunnel unhealthy "Cloudflare tunnel unavailable; connector=$ready_state; public media HTTP=$probe_status; consecutive failures=$count"
-  [[ -n "$container" ]] || return
-
-  now="$(date '+%s')"
-  if [[ -f "$STATE_ROOT/tunnel.last-restart" ]]; then
-    last_restart="$(<"$STATE_ROOT/tunnel.last-restart")"
-  fi
-  [[ "$last_restart" =~ ^[0-9]+$ ]] || last_restart=0
-  restart_elapsed=$((now - last_restart))
-  if ((restart_elapsed < TUNNEL_RESTART_COOLDOWN_SECONDS)); then
-    log "Monitor: suppressing Cloudflare connector restart for $((TUNNEL_RESTART_COOLDOWN_SECONDS - restart_elapsed))s"
-    return
-  fi
-
-  log "Monitor: restarting disconnected Cloudflare connector"
-  if compose restart cloudflared >/dev/null 2>&1; then
-    printf '%s' "$now" > "$STATE_ROOT/tunnel.last-restart"
-    clear_failures tunnel
-  else
-    log "Monitor: Cloudflare connector restart failed"
-  fi
+  update_state public-media unhealthy "public media probe failed; curl exit=$probe_exit; HTTP=${probe_status:-unknown}; consecutive failures=$count" false
 }
 
 check_disk() {
@@ -606,29 +626,147 @@ check_disk() {
 }
 
 check_app_errors() {
-  local container
-  local matches
-  local count
-  local reported=0
+  local container matches_file raw_file progress_file progress last_timestamp incomplete
+  local line count=0 cursor_temporary collection_exit=0
+  local cursor_file
+  local cursor scan_started_at
   container="$(container_id app)"
   [[ -n "$container" ]] || return 0
-  [[ "$MAX_APP_ERROR_LINES_PER_RUN" =~ ^[1-9][0-9]*$ ]] || MAX_APP_ERROR_LINES_PER_RUN=200
-  [[ "$MAX_APP_ERROR_EVENTS_PER_RUN" =~ ^[1-9][0-9]*$ ]] || MAX_APP_ERROR_EVENTS_PER_RUN=20
-  # Cap collection and HTTP fan-out so an error storm cannot create a process storm on the Docker host.
-  # 限制单轮采集与 HTTP 上报数量，避免错误风暴在 Docker 主机上放大成进程风暴。
-  matches="$(docker logs --since 40s --timestamps "$container" 2>&1 | structured_app_error_lines | sed -n "1,${MAX_APP_ERROR_LINES_PER_RUN}p" || true)"
-  if [[ -z "$matches" ]]; then
-    update_state app-errors healthy "no new error/fail events" false
-    return
+  scan_started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  cursor_file="$STATE_ROOT/app-errors-$container.cursor"
+  cursor="1970-01-01T00:00:00Z"
+  [[ -f "$cursor_file" ]] && cursor="$(<"$cursor_file")"
+  # Read a closed time window without truncation; eventKey deduplicates overlap on retry.
+  # 完整读取有上界的时间窗口，失败保留游标；重读边界由 eventKey 去重。
+  matches_file="$(mktemp "$STATE_ROOT/.app-errors.XXXXXX")" || { log "Monitor: cannot stage App logs; retaining cursor"; return 0; }
+  raw_file="$matches_file.raw"
+  progress_file="$matches_file.progress"
+  if ! (umask 077; : > "$raw_file"; : > "$progress_file"); then
+    rm -f "$matches_file" "$raw_file" "$progress_file" || true
+    log "Monitor: cannot stage App log data; retaining cursor"
+    return 0
   fi
-  count="$(printf '%s\n' "$matches" | wc -l | tr -d ' ')"
-  printf '%s\n' "$matches" >> "$LOG_ROOT/app-errors.log"
-  while IFS= read -r line; do
-    ((reported >= MAX_APP_ERROR_EVENTS_PER_RUN)) && break
-    send_app_error_event "$line"
-    reported=$((reported + 1))
-  done <<< "$matches"
-  update_state app-errors unhealthy "$count captured error/fail log events; $reported sent to observability; details saved to $LOG_ROOT/app-errors.log" false
+  monitor_docker logs --since "$cursor" --until "$scan_started_at" --timestamps "$container" > "$raw_file" 2>&1 || collection_exit=$?
+  # Timeout may leave useful complete records; discard only its unterminated final line.
+  # 超时仍可能取得完整日志行，只舍弃最后未完成行；原始纳秒时间用于安全补采。
+  if ! run_with_timeout 5 /usr/bin/python3 -c '
+import re, sys
+last = ""
+incomplete = 0
+with open(sys.argv[1], "rb") as source:
+    for line in source:
+        if not line.endswith(b"\n"):
+            incomplete = 1
+            break
+        match = re.match(rb"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z)\s+", line)
+        if match:
+            last = match.group(1).decode("ascii")
+            sys.stdout.buffer.write(line)
+with open(sys.argv[2], "w") as progress:
+    progress.write(last + "|" + str(incomplete))
+' "$raw_file" "$progress_file" | structured_app_error_lines > "$matches_file"; then
+    rm -f "$matches_file" "$raw_file" "$progress_file" || true
+    log "Monitor: App log parsing failed; retaining cursor for retry"
+    return 0
+  fi
+  progress="$(<"$progress_file")"
+  last_timestamp="${progress%%|*}"
+  incomplete="${progress#*|}"
+  if ((collection_exit != 0)) || [[ "$incomplete" == 1 ]]; then
+    if [[ -z "$last_timestamp" ]]; then
+      rm -f "$matches_file" "$raw_file" "$progress_file" || true
+      log "Monitor: App log collection incomplete without complete records; retaining cursor"
+      return 0
+    fi
+    # Since is inclusive: retry all records at the last timestamp instead of skipping its peers.
+    # since 包含边界，重读最后时间戳的全部记录，由 eventKey 去重而不丢同时间的其他行。
+    scan_started_at="$last_timestamp"
+  fi
+  if [[ -s "$matches_file" ]]; then
+    while IFS= read -r line; do
+      if ! send_app_error_event "$line"; then
+        log "Monitor: App error enqueue failed; retaining cursor for retry"
+        rm -f "$matches_file" "$raw_file" "$progress_file" || true
+        return 0
+      fi
+      count=$((count + 1))
+    done < "$matches_file"
+    cat "$matches_file" >> "$LOG_ROOT/app-errors.log" || log "Monitor: could not append local App error log"
+    update_state app-errors unhealthy "$count error/fail log events queued for observability" false
+  else
+    update_state app-errors healthy "no new error/fail events" false
+  fi
+  rm -f "$matches_file" "$raw_file" "$progress_file" || true
+  cursor_temporary="$(mktemp "$STATE_ROOT/.app-cursor.XXXXXX")" || { log "Monitor: cannot stage App cursor; next scan will retry"; return 0; }
+  if ! printf '%s' "$scan_started_at" > "$cursor_temporary" || ! mv "$cursor_temporary" "$cursor_file"; then
+    rm -f "$cursor_temporary" || true
+    log "Monitor: could not save App log cursor; next scan will retry"
+  fi
+}
+
+check_archived_app_errors() {
+  local archive archive_key cursor_file done_file cursor=0
+  local chunk_file matches_file progress_file progress next_cursor completed line
+  [[ -d "$APP_LOG_ROOT" ]] || return 0
+  # Archives are published atomically; process one bounded chunk after live sampling.
+  # 归档原子发布后才采集；实时采样完成后，每轮只处理一份归档的有限完整行。
+  for archive in "$APP_LOG_ROOT"/app-*.log; do
+    [[ -f "$archive" ]] || continue
+    archive_key="${archive##*/}"
+    cursor_file="$STATE_ROOT/app-archive-$archive_key.cursor"
+    done_file="$STATE_ROOT/app-archive-$archive_key.done"
+    [[ -f "$done_file" ]] && continue
+    [[ -f "$cursor_file" ]] && cursor="$(<"$cursor_file")"
+    [[ "$cursor" =~ ^[0-9]+$ ]] || cursor=0
+    chunk_file="$(mktemp "$STATE_ROOT/.archive-chunk.XXXXXX")" || { log "Monitor: cannot stage App archive; retaining cursor"; return 0; }
+    matches_file="$chunk_file.errors"
+    progress_file="$chunk_file.progress"
+    if ! (umask 077; : > "$matches_file"; : > "$progress_file"); then
+      rm -f "$chunk_file" "$matches_file" "$progress_file" || true
+      log "Monitor: cannot stage App archive data; retaining cursor"
+      return 0
+    fi
+    if ! run_with_timeout 5 /usr/bin/python3 -c '
+import sys
+path, offset, progress_path = sys.argv[1:]
+with open(path, "rb") as archive:
+    archive.seek(int(offset))
+    for _ in range(100):
+        line = archive.readline()
+        if not line:
+            break
+        if not line.startswith(b"#"):
+            sys.stdout.buffer.write(line)
+    end = archive.tell()
+    completed = not archive.read(1)
+with open(progress_path, "w") as progress:
+    progress.write(f"{end}:{int(completed)}")
+' "$archive" "$cursor" "$progress_file" > "$chunk_file" || ! structured_app_error_lines < "$chunk_file" > "$matches_file"; then
+      log "Monitor: App archive collection failed; retaining cursor for $archive"
+      rm -f "$chunk_file" "$matches_file" "$progress_file" || true
+      return 0
+    fi
+    while IFS= read -r line; do
+      if ! send_app_error_event "$line"; then
+        log "Monitor: App archive enqueue failed; retaining cursor for $archive"
+        rm -f "$chunk_file" "$matches_file" "$progress_file" || true
+        return 0
+      fi
+    done < "$matches_file"
+    progress="$(<"$progress_file")"
+    next_cursor="${progress%%:*}"
+    completed="${progress#*:}"
+    if ! printf '%s' "$next_cursor" > "$progress_file" || ! mv "$progress_file" "$cursor_file"; then
+      log "Monitor: App archive cursor could not be saved; queued events will be deduplicated on retry"
+    elif [[ "$completed" == 1 ]]; then
+      # The completion marker is written only after all captured events are durable.
+      # 全部采集事件持久化后才能确认归档完成，失败不得提前跳过。
+      : > "$done_file" || log "Monitor: App archive completion could not be saved; next round will retry"
+    fi
+    rm -f "$chunk_file" "$matches_file" "$progress_file" || true
+    return 0
+  done
+  return 0
 }
 
 check_auto_deploy() {
@@ -695,9 +833,11 @@ check_nas
 # Capacity reporting only reads the host mount and atomically writes FG's local snapshot.
 # 容量采集只读取宿主机挂载并原子更新本地快照，不依赖 Docker 可用。
 /usr/bin/python3 "$PROJECT_ROOT/production-lab/yingce/collect-host-metrics.py" || true
-if ! docker info >/dev/null 2>&1; then
+if ! monitor_docker info >/dev/null 2>&1; then
   update_state docker unhealthy "Docker Desktop is unavailable; requesting application start"
   /usr/bin/open -gja Docker >/dev/null 2>&1 || true
+  check_archived_app_errors
+  flush_observability_outbox
   exit 0
 fi
 
@@ -709,5 +849,6 @@ check_postgres
 check_tunnel
 check_disk
 check_app_errors
+check_archived_app_errors
 check_auto_deploy
 flush_observability_outbox

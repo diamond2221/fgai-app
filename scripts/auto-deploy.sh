@@ -8,11 +8,12 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$PROJECT_ROOT/scripts/lock-utils.sh"
+source "$PROJECT_ROOT/scripts/app-log-archive.sh"
 if ! register_lock_protocol_process; then
   printf 'Auto deploy: cannot register the current lock protocol process\n' >&2
   exit 1
 fi
-trap 'unregister_lock_protocol_process' EXIT
+trap 'fg_app_archive_cancel; unregister_lock_protocol_process' EXIT
 ENV_FILE="${FG_AUTO_DEPLOY_ENV_FILE:-$PROJECT_ROOT/.env.docker}"
 BRANCH="${FG_AUTO_DEPLOY_BRANCH:-main}"
 REMOTE="${FG_AUTO_DEPLOY_REMOTE:-origin}"
@@ -33,6 +34,7 @@ FAILED_DETAIL_FILE="$STATE_ROOT/failed-detail"
 PENDING_DEPLOY_FILE="$STATE_ROOT/pending-deploy"
 LAST_BUILD_LOG_FILE=""
 ROLLBACK_FAILED_SHA=""
+COMPOSE_RECREATE_TIMED_OUT=0
 
 mkdir -p "$STATE_ROOT" "$NAS_GUARD_ROOT"
 # Keep FD8 inherited only during the in-process version handoff after the lock is acquired.
@@ -72,6 +74,7 @@ else
 fi
 unset FG_AUTO_DEPLOY_LOCK_HELD
 cleanup() {
+  fg_app_archive_cancel
   if [[ -n "$ROLLBACK_FAILED_SHA" ]]; then
     git -C "$PROJECT_ROOT" reset --keep "$ROLLBACK_FAILED_SHA" >/dev/null 2>&1 || true
   fi
@@ -130,26 +133,25 @@ release_recreate_lock() {
 
 run_with_timeout() {
   local timeout_seconds="$1"
-  local command_pid
-  local watchdog_pid
-  local exit_code=0
   shift
-
-  "$@" &
-  command_pid=$!
-  (
-    sleep "$timeout_seconds"
-    kill -TERM "$command_pid" 2>/dev/null || exit 0
-    sleep 1
-    kill -KILL "$command_pid" 2>/dev/null || true
-  ) &
-  watchdog_pid=$!
-
-  wait "$command_pid" || exit_code=$?
-  kill "$watchdog_pid" 2>/dev/null || true
-  wait "$watchdog_pid" 2>/dev/null || true
-  return "$exit_code"
+  # Isolate only this CLI process tree; never signal Docker or container services.
+  # 只隔离并终止本次 CLI 进程树，超时不得停止 Docker daemon 或容器服务。
+  /usr/bin/python3 -c '
+import os, signal, subprocess, sys
+process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+try:
+    sys.exit(process.wait(timeout=float(sys.argv[1])))
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    sys.exit(124)
+' "$timeout_seconds" "$@"
 }
+
 
 new_deployment_version() {
   local sha="$1"
@@ -206,28 +208,37 @@ send_deploy_error_event() {
 }
 
 compose() {
+  local command=(docker)
+  local result=0
+  if [[ "${1:-}" == up ]]; then
+    command=(run_with_timeout 120 docker)
+    COMPOSE_RECREATE_TIMED_OUT=0
+  fi
   local compose_files=(--file "$PROJECT_ROOT/docker-compose.yml")
   if [[ "$COMPOSE_STORAGE_MODE" == "nas" ]]; then
     compose_files+=(--file "$PROJECT_ROOT/docker-compose.nas.yml")
   fi
   if [[ -n "$COMPOSE_PROFILE" ]]; then
-    docker compose \
+    "${command[@]}" compose \
       "${compose_files[@]}" \
       --project-directory "$PROJECT_ROOT" \
       --project-name "$COMPOSE_PROJECT_NAME" \
       --env-file "$ENV_FILE" \
       --profile "$COMPOSE_PROFILE" \
-      "$@"
-    return
+      "$@" || result=$?
+    [[ "$result" == 124 ]] && COMPOSE_RECREATE_TIMED_OUT=1
+    return "$result"
   fi
   # Do not expand an empty Bash array under nounset when HTTPS is disabled.
   # 未启用 HTTPS 时不展开空 Bash array，避免 nounset 导致自动部署失败。
-  docker compose \
+  "${command[@]}" compose \
     "${compose_files[@]}" \
     --project-directory "$PROJECT_ROOT" \
     --project-name "$COMPOSE_PROJECT_NAME" \
     --env-file "$ENV_FILE" \
-    "$@"
+    "$@" || result=$?
+  [[ "$result" == 124 ]] && COMPOSE_RECREATE_TIMED_OUT=1
+  return "$result"
 }
 
 set_storage_guard() {
@@ -312,19 +323,28 @@ archive_app_logs() {
   local container
   local timestamp
   local output_file
+  local temporary
 
-  container="$(compose ps -q app 2>/dev/null || true)"
+  container="$(fg_app_archive_container "$COMPOSE_PROJECT_NAME")" || return 1
   [[ -n "$container" ]] || return 0
   timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
-  mkdir -p "$APP_LOG_ROOT"
+  (umask 077 && mkdir -p "$APP_LOG_ROOT") || return 1
   output_file="$APP_LOG_ROOT/app-${timestamp}-${container:0:12}-${reason}.log"
+  temporary="$(mktemp "$APP_LOG_ROOT/.app-archive.XXXXXX")" || return 1
 
+  # Publish only complete archives; monitors must never acknowledge a partially written file.
+  # 仅原子发布完整归档，避免监控将尚未写完的文件误标为已采集。
   {
     printf '# container=%s\n' "$container"
     printf '# archived_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf '# reason=%s\n' "$reason"
-    docker logs --timestamps "$container"
-  } > "$output_file"
+    run_with_timeout 30 docker logs --timestamps "$container"
+  } > "$temporary" 2>&1 || {
+    rm -f "$temporary"
+    log "Auto deploy: app log archive failed"
+    return 1
+  }
+  mv "$temporary" "$output_file" || { rm -f "$temporary"; return 1; }
   log "Auto deploy: archived app logs to $output_file"
 }
 
@@ -515,6 +535,7 @@ rollback() {
   local previous_sha="$1"
   local failed_sha="$target_sha"
   local services=(app)
+  local old_app_container
 
   if ! nas_is_ready || ! probe_deploy_mount; then
     log "Auto deploy: NAS preflight failed; keeping the offline-capable deployment checkout instead of rolling back to a NAS-required revision"
@@ -560,12 +581,20 @@ rollback() {
     log "Auto deploy: NAS preflight changed during rollback build; App remains untouched"
     return 1
   fi
+  if ! old_app_container="$(fg_app_archive_container "$COMPOSE_PROJECT_NAME")" || ! fg_app_archive_start "$old_app_container" "rollback-${previous_sha:0:12}" "$APP_LOG_ROOT"; then
+    restore_failed_checkout "$failed_sha" "rollback-archive-unavailable"
+    release_recreate_lock
+    log "Auto deploy: rollback deferred because old App logs could not be followed"
+    return 1
+  fi
   if ! compose up -d --no-deps --force-recreate --remove-orphans "${services[@]}" >/dev/null; then
+    fg_app_archive_finish || log "Auto deploy: rollback archive is partial; captured lines retained"
     restore_failed_checkout "$failed_sha" "rollback-compose-start"
     release_recreate_lock
     log "Auto deploy: rollback Compose start failed"
     return 1
   fi
+  fg_app_archive_finish || log "Auto deploy: rollback archive is partial; captured lines retained"
   if ! wait_for_healthy; then
     restore_failed_checkout "$failed_sha" "rollback-health-check"
     release_recreate_lock
@@ -745,7 +774,6 @@ if ! apply_database_upgrade; then
   exit 1
 fi
 
-archive_app_logs "before-${target_sha:0:12}"
 if ! acquire_recreate_lock; then
   log "Auto deploy: App recreation lock is busy; deployment deferred"
   git -C "$PROJECT_ROOT" reset --keep "$previous_sha" >/dev/null
@@ -763,17 +791,33 @@ if ! set_storage_guard; then
     log "Auto deploy: local NAS guard could not be written; offline storage mode remains active"
   fi
 fi
+old_app_container="$(fg_app_archive_container "$COMPOSE_PROJECT_NAME")" || {
+  release_recreate_lock
+  log "Auto deploy: cannot identify old App for archival; deployment deferred"
+  exit 1
+}
+if ! fg_app_archive_start "$old_app_container" "before-${target_sha:0:12}" "$APP_LOG_ROOT"; then
+  release_recreate_lock
+  log "Auto deploy: old App log follow unavailable; deployment deferred"
+  exit 1
+fi
 if ! compose up -d --no-deps --force-recreate --remove-orphans app >/dev/null \
   || ! wait_for_healthy \
   || ! legacy_video_worker_is_absent \
   || ! reload_nginx; then
+  fg_app_archive_finish || log "Auto deploy: old App archive is partial; captured lines retained"
   release_recreate_lock
-  archive_app_logs "failed-${target_sha:0:12}"
+  archive_app_logs "failed-${target_sha:0:12}" || log "Auto deploy: failed container logs unavailable; evaluating recovery"
   record_failed_deployment "$target_sha" "container-health"
-  rollback "$previous_sha" || true
+  if (( COMPOSE_RECREATE_TIMED_OUT )); then
+    log "Auto deploy: Compose CLI timed out; daemon operation is unconfirmed, skipping automatic rollback"
+  else
+    rollback "$previous_sha" || true
+  fi
   send_deploy_error_event "$target_sha" "container-health"
   exit 1
 fi
+fg_app_archive_finish || log "Auto deploy: old App archive is partial; captured lines retained"
 release_recreate_lock
 
 rm -f "$FAILED_SHA_FILE" "$FAILED_DETAIL_FILE" "$PENDING_DEPLOY_FILE"

@@ -8,8 +8,8 @@ export const runtime = 'nodejs';
 async function notify(results: Awaited<ReturnType<typeof generateDueReports>>) {
   const webhook = process.env.FG_REPORT_WEBHOOK_URL;
   if (!webhook) return;
-  const delivered = results.filter((result) => result.status === 'succeeded');
-  const failed = results.filter((result) => result.status === 'failed');
+  const delivered = results.filter((result) => result.status === 'succeeded' && !result.recomputed);
+  const failed = results.filter((result) => result.status === 'failed' && !result.recomputed);
   if (!delivered.length && !failed.length) return;
   const message = [
     `FG Studio 报表任务：成功 ${delivered.length}，失败 ${failed.length}`,
