@@ -31,6 +31,18 @@ func TestPromptOperationCatalogContainsProductJobs(t *testing.T) {
 	}
 }
 
+func TestChapterAssetExtractionReceivesSkillAndStaticStyleContract(t *testing.T) {
+	context := protectedPromptContext(OperationChapterAssetsExtract, map[string]string{
+		"资产技能": "<skill-file>完整资产模板：角色、无人场景、单件道具</skill-file>",
+		"项目画风": "二维水彩，统一线条", "章节正文": "主播听到敲门声，摄影机后退。",
+	})
+	for _, required := range []string{"<skill-file>完整资产模板", "二维水彩", "multiViewPrompt", "无人空镜", "不写运镜", "动画与非人角色", "chapter-assets/v1"} {
+		if !strings.Contains(context, required) {
+			t.Errorf("extraction context missing %q", required)
+		}
+	}
+}
+
 func TestRenderShortDramaTemplateSubstitutesVariables(t *testing.T) {
 	definition, ok := PromptDefinition(OperationShortDramaOutline)
 	if !ok {

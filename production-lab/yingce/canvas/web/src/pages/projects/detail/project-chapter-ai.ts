@@ -10,7 +10,7 @@ import { skillRuntime } from "@/services/skill-runtime";
 import { logicalModelIDForConfig, type AiConfig } from "@/stores/use-config-store";
 import { modelOptionName } from "@/stores/use-config-store";
 import { dramaStoryboardContract, parseDramaProductionPlan, validateDramaStoryboard, type DramaProductionPlan } from "@/lib/short-drama-production";
-import { shortDramaSkillContext, shortDramaSkillProvenance, SHORT_DRAMA_BUILTIN_SKILLS } from "@/lib/prompts/short-drama-skill-context";
+import { shortDramaAssetSkillContext, shortDramaSkillContext, shortDramaSkillProvenance, SHORT_DRAMA_BUILTIN_SKILLS } from "@/lib/prompts/short-drama-skill-context";
 
 import type { ChapterStoryboardAsset, ChapterStoryboardCharacter } from "./chapter-storyboard-production";
 
@@ -171,7 +171,14 @@ async function runProjectTextTask(input: ChapterAnalysisInput, operation: string
         mode: "text",
         prompt: promptTemplateTaskPlaceholder("章节角色、场景与道具提取"),
         config: { ...input.config, model },
-        metadata: { domainProjectId: input.projectId, chapterId: input.chapterId, operation, promptTemplateOperation: PromptTemplateOperation.ChapterAssetsExtract, promptTemplateVariables },
+        metadata: {
+            domainProjectId: input.projectId,
+            chapterId: input.chapterId,
+            operation,
+            promptTemplateOperation: PromptTemplateOperation.ChapterAssetsExtract,
+            promptTemplateVariables: { ...promptTemplateVariables, 资产技能: shortDramaAssetSkillContext() },
+            builtinDramaSkills: (await shortDramaSkillProvenance()).filter((skill) => skill.name === "short-drama-asset-prompts"),
+        },
         onTaskCreated: options?.onTaskUpdate,
     });
     if (!result.text?.trim()) throw new Error("模型没有返回可用结果");

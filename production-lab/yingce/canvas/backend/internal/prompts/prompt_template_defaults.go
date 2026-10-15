@@ -129,6 +129,8 @@ func protectedPromptContext(operation string, values map[string]string) string {
 	case OperationChapterAssetsExtract:
 		return strings.Join([]string{
 			fmt.Sprintf("【任务】\n从短剧项目《%s》的章节“%s”提取角色、场景和道具。", values["项目名称"], values["章节名称"]),
+			values["资产技能"],
+			"【资产技能应用与统一画风】\n使用 short-drama-asset-prompts 的角色、无人场景、单件道具结构。当前项目媒介、明确身份与族裔、物种和用户设定优先于模板范例；不复制模板中的中国/东亚默认身份，不为每个资产随机切换胶片或导演。角色 multiViewPrompt 和场景/道具 prompt 必须是可以直接生图的中文静态资产提示词：写清轮廓、比例、材质、色彩、构图与光源，不写运镜、动作时间线、声音、对白或剧情推进。场景 description 可以记录剧情用途，但 prompt 必须是无人空镜；道具不得画出使用者或手。角色三视图保持同一服装、体态和身份；动画与非人角色不套用真人皮肤。统一继承项目色板、渲染、颗粒和材质体系，具体地点与真实光源服从本项事实，不把世界观里的某一地点复制到全部资产。原文未明确的信息在设定字段标明，不把‘正文未明确’或待确认占位字样写入生图 prompt，不擅自补人种、服装或场景布局。",
 			"【项目画风】\n" + values["项目画风"],
 			"【章节正文】\n" + values["章节正文"],
 			"【受保护输出契约】\n" + promptOutputContract(operation),

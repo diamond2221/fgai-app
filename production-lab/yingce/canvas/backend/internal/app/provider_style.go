@@ -68,7 +68,21 @@ func (s *Service) applyGenerationStyleProfile(userID string, taskProjectID strin
 	if expectedStatus == "blocked" {
 		return fmt.Errorf("当前图片模型无法完整执行项目画风：%s。请切换图片模型，或在项目设置中停用对应画风资产", strings.Join(warnings, "；"))
 	}
-	return s.appendStyleReferenceImages(userID, profile, input)
+	if err := s.appendStyleReferenceImages(userID, profile, input); err != nil {
+		return err
+	}
+	if metadataString(input.Metadata, "source") == "project-asset-batch" {
+		input.Prompt += "\n\n【静态资产画风适用范围】\n项目画风只统一媒介、色板、材质、渲染与影像质感。画风文字中的人物行动、拍摄运动、声音和默认地点不是本项资产内容；具体身份、物种、场景布局、地点和真实光源服从本项设定。角色保持同一身份与服装的全身三视图；场景为无人空镜；道具为单件完整展示、无人无手。画风参考不替换人物身份与场景结构，不为各项随机切换胶片或导演。"
+		execution, _ := input.Metadata["assetPromptExecution"].(map[string]interface{})
+		if execution == nil {
+			execution = map[string]interface{}{}
+		}
+		execution["finalPrompt"] = input.Prompt
+		execution["projectStyleRevision"] = profile.Revision
+		execution["projectStylePrompt"] = stylePrompt
+		input.Metadata["assetPromptExecution"] = execution
+	}
+	return nil
 }
 
 func (s *Service) appendStyleReferenceImages(userID string, profile styleProfileDocument, input *canvasGenerationInput) error {

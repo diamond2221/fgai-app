@@ -23,7 +23,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useEffectiveConfig } from "@/stores/use-config-store";
 import { confirmProjectAssetCandidate, listProjectAssetsPage, listProjectAssetCandidates, updateProjectAssetVisual, updateProjectCharacter, type ProjectAsset, type ProjectDetail } from "@/services/api/projects";
 import { characterTurnaroundConfig } from "./project-character-media";
-import { ASSET_PROMPT_SKILL, projectAssetGenerationPrompt, projectAssetHasImage, runAssetBatch } from "./project-asset-generation-plan";
+import { ASSET_PROMPT_SKILL, projectAssetExecutionPrompt, projectAssetGenerationPrompt, projectAssetHasImage, runAssetBatch } from "./project-asset-generation-plan";
 import { categoryLabel, categoryLabels } from "./shared";
 
 type Row = { id: string; asset: ProjectAsset; candidateId?: string; prompt: string; references: string[]; selected: boolean; operationId: string; status?: string; error?: string; taskId?: string };
@@ -43,6 +43,10 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
     const change = (id: string, patch: Partial<Row>) => setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
     const styleProfile = useMemo(() => parseStyleProfile(detail.project.styleProfileJson), [detail.project.styleProfileJson]);
     const referenceIds = (row: Row) => [...new Set([...row.references, ...styleReferenceResourceIds(styleProfile)])];
+    const executionPrompt = (row: Row) => {
+        const styleIds = fgImageStyles.filter((skill) => row.prompt.includes(`@[skill:${skill.skillId}]`) || row.prompt.includes(`@${skill.slug}`)).map((skill) => skill.skillId);
+        return projectAssetExecutionPrompt(composeFGImageStylePrompt(row.prompt, styleIds) || row.prompt, row.asset.category, style?.prompt || "");
+    };
     useEffect(() => {
         let cancelled = false;
         void (async () => {
@@ -156,14 +160,24 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                 async (row) => {
                     if (generate && !row.prompt.trim()) throw Error("请填写图片提示词");
                     const styleSkillIds = fgImageStyles.filter((skill) => row.prompt.includes(`@[skill:${skill.skillId}]`) || row.prompt.includes(`@${skill.slug}`)).map((skill) => skill.skillId);
-                    const generationPrompt = composeFGImageStylePrompt(row.prompt, styleSkillIds) || row.prompt;
+                    const generationPrompt = executionPrompt(row);
                     // Direct image models receive the selected style's visual direction, not a multi-step Skill workflow.
                     // Read selected Skill versions/files for auditable provenance while preserving the editable user prompt.
                     const styleRuntime = generate && styleSkillIds.length ? await skillRuntime.prepare({ profile: "canvas", prompt: row.prompt, skills: catalog, selectedSkillIds: styleSkillIds, capability: "image" }) : undefined;
                     const referenceImages = await Promise.all(
                         referenceIds(row).map(async (id) => {
                             const resource = await getResource(id);
-                            return { id, name: resource.id, type: resource.mimeType, dataUrl: "", storageKey: resourceStorageKey(id), width: resource.width, height: resource.height, bytes: resource.size };
+                            const isStyle = styleReferenceResourceIds(styleProfile).includes(id);
+                            return {
+                                id,
+                                name: isStyle ? "画风参考（仅色彩、光影、材质和媒介）" : `${row.asset.title} · 身份或结构参考`,
+                                type: resource.mimeType,
+                                dataUrl: "",
+                                storageKey: resourceStorageKey(id),
+                                width: resource.width,
+                                height: resource.height,
+                                bytes: resource.size,
+                            };
                         }),
                     );
                     if (generate) await prepareBackendGenerationTask({ projectId: detail.project.id, mode: "image", prompt: generationPrompt, config, referenceImages });
@@ -190,6 +204,7 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                             characterAssetId: asset.category === "character" ? asset.id : undefined,
                             resolvedCharacterVersions: asset.character ? [{ assetId: asset.id, versionId: asset.character.versionId }] : [],
                             assetPromptSkill: provenance,
+                            assetPromptExecution: { method: "asset-template-compiler-v2", editablePrompt: row.prompt, finalPrompt: generationPrompt, projectStyleRevision: styleProfile?.revision, projectStylePrompt: style?.prompt || "" },
                             imageStyleSkillIds: styleSkillIds,
                             imageStyleExecution: styleRuntime ? { method: "curated-image-direction", ...styleRuntime.metadata, directions: styleSkillIds.map((id) => fgImageStyles.find((skill) => skill.skillId === id)) } : undefined,
                             stylePresetId: style?.id,
@@ -253,6 +268,7 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                     <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs">{style?.prompt || "项目未设置画风，可先在项目设置中补充地区、时代、视觉媒介和角色身份。"}</pre>
                 </details>
                 {styleReferenceResourceIds(styleProfile).length > 0 && <p className="text-xs text-foreground/65">已继承 {styleReferenceResourceIds(styleProfile).length} 张画风参考图，随每项资产一起提交。只参考光影、色彩和材质。</p>}
+                {!styleReferenceResourceIds(styleProfile).length && <p className="text-xs text-foreground/65">当前使用文字画风约束，未添加画风参考图。可在项目设置上传统一的画风样片，提升整组资产的视觉一致性；不会自动引用其他角色的脸或场景。</p>}
                 <ModelPicker
                     config={config}
                     value={config.model}
@@ -300,6 +316,19 @@ export function ProjectAssetGenerationModal({ detail, single, onClose, onRefresh
                                     <p className="mt-2 text-xs text-foreground/55">历史图片未记录完整提示词；下方为按现有设定整理的重新生成草稿。</p>
                                 )}
                                 <Input.TextArea className="mt-2" aria-label={`${row.asset.title} 生图提示词`} autoSize={{ minRows: 5, maxRows: 12 }} value={row.prompt} disabled={busy} onChange={(e) => change(row.id, { prompt: e.target.value })} />
+                                <details className="mt-2 text-xs text-foreground/65">
+                                    <summary>查看提交提示词预览（含当前项目画风与静态资产规则）</summary>
+                                    <p>服务端会核对最新项目画风，最终执行内容保存在任务记录中。</p>
+                                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap">
+                                        {(() => {
+                                            try {
+                                                return executionPrompt(row);
+                                            } catch (e) {
+                                                return e instanceof Error ? e.message : "提示词暂不可用";
+                                            }
+                                        })()}
+                                    </pre>
+                                </details>
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
                                     <FGSkillControl references={[]} prompt={row.prompt} onChange={(prompt) => change(row.id, { prompt })} disabled={busy} capability="image" imageStylesOnly />
                                     <Button size="small" disabled={busy} onClick={() => change(row.id, { prompt: projectAssetGenerationPrompt(row.asset, style?.prompt || "", true) })}>

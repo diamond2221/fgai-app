@@ -25,6 +25,11 @@ function skillsFor(includeAction: boolean) {
     return includeAction ? [...SHORT_DRAMA_BUILTIN_SKILLS, { name: "wuxi-action-director-public", files: [{ path: "SKILL.md", content: actionSkill }] }] : SHORT_DRAMA_BUILTIN_SKILLS;
 }
 
+export function shortDramaAssetSkillContext() {
+    const skill = SHORT_DRAMA_BUILTIN_SKILLS[0];
+    return `<skill-context name="${skill.name}">\n${skill.files.map((file) => `<skill-file path="${file.path}">\n${file.content}\n</skill-file>`).join("\n\n")}\n</skill-context>`;
+}
+
 export function shortDramaSkillContext(includeAction = false) {
     return skillsFor(includeAction)
         .map((skill) => `<skill-context name="${skill.name}">\n${skill.files.map((file) => `<skill-file path="${file.path}">\n${file.content}\n</skill-file>`).join("\n\n")}\n</skill-context>`)

@@ -2904,6 +2904,24 @@ func TestEquivalentStyleProfileJSONIgnoresObjectKeyOrder(t *testing.T) {
 	}
 }
 
+func TestAssetBatchFinalPromptRecordsEffectiveStyleAndStaticBoundaries(t *testing.T) {
+	profile := styleProfileDocument{SchemaVersion: 1, PresetID: "style-asset", Title: "项目画风", Source: "user", Revision: 3, Prompt: "真人恐怖电影，冷灰蓝，加州农舍，手持后退", ExecutionPolicy: "compatible-fallback", Assets: []styleProfileAsset{}}
+	input := canvasGenerationInput{
+		Prompt: "主播直播间设定", Config: providerConfig{Model: "image-model", InterfaceType: "openai-image"},
+		Metadata: map[string]interface{}{"source": "project-asset-batch", "styleProfileJson": prompts.MustStyleProfileJSON(profile), "assetPromptExecution": map[string]interface{}{"editablePrompt": "主播直播间设定"}},
+	}
+	if err := (&Service{}).applyGenerationStyleProfile("user-1", "", &input); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(input.Prompt, profile.Prompt) || !strings.HasSuffix(input.Prompt, "不为各项随机切换胶片或导演。") || !strings.Contains(input.Prompt, "默认地点不是本项资产内容") {
+		t.Fatalf("static asset boundaries missing from %q", input.Prompt)
+	}
+	execution := input.Metadata["assetPromptExecution"].(map[string]interface{})
+	if execution["finalPrompt"] != input.Prompt || execution["projectStyleRevision"] != 3 || execution["editablePrompt"] != "主播直播间设定" {
+		t.Fatalf("effective prompt audit mismatch: %#v", execution)
+	}
+}
+
 func TestRunNovitaVideoTaskDownloadsSucceededVideo(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
 	paths := make([]string, 0, 3)
