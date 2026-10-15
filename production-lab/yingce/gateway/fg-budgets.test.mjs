@@ -26,13 +26,24 @@ test('an incomplete multimodal quote cannot authorize a capped request',()=>{
  assert.match(monthStart(),/^\d{4}-\d{2}-01T00:00:00\+08:00$/);
 });
 
-function speechBudgetPool({access=true,monthly=0,project=0,snapshot={enabled:true,provider:'volcengine',pricing_rules:{}}}={}){
+function speechBudgetPool({access=true,monthly=0,project=0,lifetime=null,snapshot={enabled:true,provider:'volcengine',pricing_rules:{}}}={}){
  const queries=[];
  const client={release(){},async query(sql,params){queries.push({sql,params});
-  const rows=sql.includes("status='active'")?[{id:'member'}]:sql.includes('w.native_project_id')?(access?[{id:'ad-project'}]:[]):sql.includes('SELECT monthly_cny')?[{monthly_cny:monthly}]:sql.includes('SELECT budget_cny')?[{budget_cny:project}]:sql.includes('SELECT snapshot')?[{snapshot}]:sql.includes("key='usdCnyRate'")?[{value:6.77}]:[];
+  const rows=sql.includes("status='active'")?[{id:'member'}]:sql.includes('w.native_project_id')?(access?[{id:'ad-project'}]:[]):sql.includes('SELECT monthly_cny')?[{monthly_cny:monthly}]:sql.includes('SELECT lifetime_cny')?[{lifetime_cny:lifetime}]:sql.includes('SELECT budget_cny')?[{budget_cny:project}]:sql.includes('SELECT snapshot')?[{snapshot}]:sql.includes("key='usdCnyRate'")?[{value:6.77}]:[];
   return {rows};
  }};return {queries,connect:async()=>client};
 }
+
+test('one-time allowance cannot reset monthly or bypass unknown-price company speech',async()=>{
+ const unknown=speechBudgetPool({lifetime:5});
+ await assert.rejects(()=>reserveBudget(unknown,{userId:'member',model:'seed-tts-2.0',capability:'audio'}),/体验账号/);
+ assert.ok(!unknown.queries.some(q=>q.sql.includes('INSERT INTO')));
+ const over=speechBudgetPool({lifetime:5,snapshot:{enabled:true,provider:'wetoken',discount:1,pricing_rules:{input_price:1000,output_price:1000}}});
+ await assert.rejects(()=>reserveBudget(over,{userId:'member',model:'ordinary-text',capability:'text',payload:{messages:[],max_tokens:1000}}),/一次性总额度/);
+ for(const q of over.queries.filter(q=>q.sql.includes('FROM api_call_logs c')||q.sql.includes('SELECT r.*')))assert.equal(q.params[2],null,'lifetime history must have no month cutoff');
+ assert.ok(over.queries.some(q=>q.sql.includes('pg_advisory_xact_lock')));
+ assert.ok(!over.queries.some(q=>q.sql.includes('INSERT INTO')));
+});
 test('audio utilities reject inaccessible advertising contexts before reserving charges',async()=>{
  const pool=speechBudgetPool({access:false});
  await assert.rejects(()=>reserveBudget(pool,{userId:'member',advertisingWorkspaceId:'foreign',model:'volc.seedasr.auc',capability:'transcription'}),/无权/);

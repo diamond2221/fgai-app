@@ -13,7 +13,20 @@ import (
 // while administrators' own work remains isolated from other administrators.
 func fgTeamEnabled() bool { return os.Getenv("CANVAS_FG_TEAM_WORKSPACE") == "true" }
 
+func fgPublicDemo(db *gorm.DB, userID string) bool {
+	if !fgTeamEnabled() {
+		return false
+	}
+	lookup := db.Session(&gorm.Session{NewDB: true})
+	var count int64
+	// Use the server-maintained account bridge, never a client scope flag.
+	return lookup.Table("fg_accounts").Where("user_id=? AND email=?", userID, "test@beva.com").Count(&count).Error == nil && count == 1
+}
+
 func fgProjectScope(db *gorm.DB, table, userID string) *gorm.DB {
+	if fgPublicDemo(db, userID) {
+		return db.Where(table+".fg_deleted_at IS NULL AND "+table+".user_id = ?", userID)
+	}
 	if !fgTeamEnabled() {
 		return db.Where(table+".user_id = ?", userID)
 	}
@@ -21,12 +34,18 @@ func fgProjectScope(db *gorm.DB, table, userID string) *gorm.DB {
 }
 func fgCanvasScope(db *gorm.DB, userID string) *gorm.DB {
 	db = db.Where("canvas_projects.deleted_at IS NULL")
+	if fgPublicDemo(db, userID) {
+		return db.Where("canvas_projects.user_id = ?", userID)
+	}
 	if !fgTeamEnabled() {
 		return db.Where("canvas_projects.user_id = ?", userID)
 	}
 	return db.Where("(canvas_projects.user_id = ? OR EXISTS (SELECT 1 FROM fg_story_projects fg WHERE fg.native_project_id = canvas_projects.project_id)"+fgMemberManagementScope(db, userID, "canvas_projects.user_id")+")", userID)
 }
 func fgMediaScope(db *gorm.DB, table, grantTable, grantColumn, userID string) *gorm.DB {
+	if fgPublicDemo(db, userID) {
+		return db.Where(table+".user_id = ?", userID)
+	}
 	if !fgTeamEnabled() {
 		return db.Where(table+".user_id = ?", userID)
 	}

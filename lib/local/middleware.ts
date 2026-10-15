@@ -4,6 +4,7 @@ const SESSION_COOKIE = "fg_session";
 
 export function updateSession(request: NextRequest, traceId?: string) {
   const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-fg-request-path", request.nextUrl.pathname);
   if (traceId) requestHeaders.set("x-fg-trace-id", traceId);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   if (traceId) response.headers.set("x-fg-trace-id", traceId);

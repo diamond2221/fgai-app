@@ -24,6 +24,7 @@ import {initializeInspiration,startInspirationSync,inspirationRoute} from './fg-
 import {registerSpeechStream} from './fg-speech-stream.mjs';
 import {canvasOwnersRoute} from './fg-canvas-owners.mjs';
 import {initializeMeilin,meilinInternalRoute,meilinUserRoute} from './fg-meilin.mjs';
+import {isPublicDemo,publicDemoDenied} from './fg-public-demo.mjs';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 8 });
 const editorPool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 16 });
@@ -139,6 +140,7 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({code:0,data:{user:null},msg:''}));return;
     }
     if (!actor) { respond(res,403,'请先登录 FG Studio','FG_ACCESS_DENIED'); return; }
+    if(isPublicDemo(actor)&&publicDemoDenied(path,req.method)){respond(res,403,'公用体验账号仅开放独立创作、画布和短剧测试，不开放公司内容或个人密钥设置','FG_DEMO_ISOLATED');return;}
     if(path.pathname.startsWith('/api/admin/')&&!actor.reviewer){respond(res,403,'仅超级管理员可管理平台','FG_ADMIN_REQUIRED');return;}
     if (path.pathname === '/fg/entry' && req.method === 'GET') {
       const entryURL = workspaceEntryURL(req.headers.host, externalOrigins, publicOrigin);
@@ -233,7 +235,7 @@ server.headersTimeout = 60000;
 const speechStreams=registerSpeechStream(server,{pool,origins:[publicOrigin,platformOrigin,...externalOrigins],parsePath:url=>workspaceRequestPath(url,publicOrigin),authenticate:async req=>{const actor=await platformActor(req);if(actor)await canvasSession(actor);return actor;}});
 server.listen(3010, '0.0.0.0');
 const arcOrigin=new URL(publicOrigin);arcOrigin.port='3017';
-const arcServer=createArcReelServer({pool,platformActor,canvasSession,platformOrigin,publicOrigin:arcOrigin.origin,externalOrigins});
+const arcServer=createArcReelServer({pool,platformActor:async req=>{const actor=await platformActor(req);return isPublicDemo(actor)?null:actor;},canvasSession,platformOrigin,publicOrigin:arcOrigin.origin,externalOrigins});
 arcServer.requestTimeout=0;
 arcServer.headersTimeout=60000;
 arcServer.listen(3020,'0.0.0.0');

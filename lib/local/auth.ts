@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { isPublicDemo, publicDemoMainPathAllowed } from "@/lib/auth/public-demo";
 import { query } from "@/lib/local/db";
 import { hashPassword, verifyPassword } from "@/lib/local/password";
 import type { LocalUser } from "@/lib/local/types";
@@ -63,5 +64,7 @@ export async function getCurrentUser(): Promise<LocalUser | null> {
      where s.id = $1 and s.expires_at > now()` ,
     [sessionId],
   );
-  return result.rows[0] || null;
+  const user = result.rows[0] || null;
+  if (user && isPublicDemo(user.email) && !publicDemoMainPathAllowed(headers().get("x-fg-request-path") || "")) return null;
+  return user;
 }

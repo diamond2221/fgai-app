@@ -41,7 +41,7 @@ function toolItem(slug: NavigationToolSlug, to: string): WorkspaceNavItem {
     return { id: slug, title: tool?.label ?? slug, icon: tool?.icon, to };
 }
 
-function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[]; footer: WorkspaceNavItem[] } {
+function buildNav(features: FeatureAvailability, publicDemo = false): { groups: WorkspaceNavGroup[]; footer: WorkspaceNavItem[] } {
     const groups: WorkspaceNavGroup[] = [
         {
             items: [
@@ -70,6 +70,10 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
 
     // 管理、设置和退出登录不再占据参考站式侧栏底部，而是通过用户卡片菜单进入。
     // 路由和写操作仍保留，避免把用户端导航变成无法访问的装饰。
+    if (publicDemo) {
+        const hidden = new Set(["fg-stories", "fg-advertising", "fg-creator", "fg-arcreel", "fg-audio-settings", "plugins"]);
+        for (const group of groups) group.items = group.items.filter((item) => !hidden.has(item.id));
+    }
     return { groups, footer: [] };
 }
 
@@ -343,7 +347,8 @@ export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExp
     const features = useUserStore((state) => state.features);
     const user = useUserStore((state) => state.user);
     const { handleLogout } = useWorkspaceLogout();
-    const { groups, footer } = useMemo(() => buildNav(features), [features]);
+    const publicDemo = user?.email?.toLowerCase() === "test@beva.com";
+    const { groups, footer } = useMemo(() => buildNav(features, publicDemo), [features, publicDemo]);
 
     const activeId = workspaceNavActiveId(pathname, searchParams.get("section"));
 

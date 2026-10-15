@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS fg_fee_decisions(reference_id varchar(160) PRIMARY KE
 CREATE TABLE IF NOT EXISTS fg_finance_audit(id uuid PRIMARY KEY,actor_id varchar(36) NOT NULL REFERENCES users(id),action varchar(40) NOT NULL,target text NOT NULL,before_value jsonb,after_value jsonb,created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS fg_request_decisions(call_id varchar(36) PRIMARY KEY REFERENCES api_call_logs(id),note text NOT NULL,actor_id varchar(36) NOT NULL REFERENCES users(id),updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS fg_user_budgets(user_id varchar(36) PRIMARY KEY REFERENCES users(id),monthly_cny numeric(16,2) NOT NULL DEFAULT 0 CHECK(monthly_cny>=0),updated_by varchar(36) REFERENCES users(id),updated_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE fg_user_budgets ADD COLUMN IF NOT EXISTS lifetime_cny numeric(16,2) CHECK(lifetime_cny>=0);
 CREATE TABLE IF NOT EXISTS fg_budget_reservations(id uuid PRIMARY KEY,user_id varchar(36) NOT NULL REFERENCES users(id),project_id varchar(36),task_id varchar(36),model text NOT NULL,reserved_cny numeric(20,6),created_at timestamptz NOT NULL DEFAULT now());
 ALTER TABLE api_call_logs ADD COLUMN IF NOT EXISTS fg_budget_reservation_id varchar(36) NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS fg_budget_actor_time ON fg_budget_reservations(user_id,created_at);

@@ -85,6 +85,16 @@ export async function reserveBudget(pool,input){
   // The company subscription pays for Suno; members reserve no personal spend.
   const quoted=companyMusic(input.model,snapshot)?0:admissionPrice(input.model,input.capability,input.payload||{},snapshot,fx);
   const amount=quoted===null?null:quoted===0?0:microCny(quoted)/1e6;
+  // One-time demo allowance uses the same serialized reservation lock, all
+  // historical requests and outstanding reservations. It never resets monthly
+  // and intentionally includes company-audio exemptions in its safety check.
+  const lifetimeRow=(await client.query('SELECT lifetime_cny FROM fg_user_budgets WHERE user_id=$1',[input.userId])).rows[0];
+  if(lifetimeRow?.lifetime_cny!==null&&lifetimeRow?.lifetime_cny!==undefined){
+   const lifetime=Number(lifetimeRow.lifetime_cny);
+   if(!Number.isFinite(lifetime)||!(amount>=0)||amount===null)throw Error('体验账号无法确认本次费用上限，已暂停提交');
+   const usage=await spendUsage(client,{userId:input.userId});
+   if(usage.unknown||microCny(usage.used)+microCny(amount)>Math.round(lifetime*1e6))throw Error('体验账号一次性总额度不足或有费用待确认，已停止新的收费生成；额度不按月恢复');
+  }
   if(!capExemptAudio(input.model,snapshot)&&!(input.capability==='text'&&isCompanyText(input.model,snapshot))){
    if((limit>0||budget>0)&&(!(amount>=0)||amount===null))throw Error('本模型规格暂不能确定费用上限，限额项目中暂停提交，请联系超级管理员');
    if(limit>0){const usage=await spendUsage(client,{userId:input.userId,since:monthStart(),excludeCapExemptAudio:true});if(usage.unknown||microCny(usage.used)+microCny(amount)>Math.round(limit*1e6))throw Error('本月费用额度不足或有金额待确认，请联系超级管理员调整限额');}

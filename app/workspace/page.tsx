@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import WorkspaceHub from "@/components/WorkspaceHub";
 import { createClient } from "@/lib/local/server";
 import { canAccessProductionLab } from "@/lib/production-lab/access-policy";
+import { isPublicDemo } from "@/lib/auth/public-demo";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ export default async function WorkspacePage() {
   const localClient = createClient();
   const { data: { user } } = await localClient.auth.getUser();
   if (!user) redirect("/login");
+  if (isPublicDemo(user.email)) redirect("/fg-six/");
 
   const [{ data: profile }, { count: projectCount }] = await Promise.all([
     localClient.from("profiles").select("platform_role").eq("id", user.id).maybeSingle(),
