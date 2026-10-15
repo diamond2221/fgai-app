@@ -91,6 +91,7 @@ async function canvasSession(actor) {
         ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name,role=EXCLUDED.role,status='active',updated_at=now()`,
         [actor.id, 'fg_' + actor.id.replaceAll('-', '').slice(0,29), String(actor.name || 'FG 成员').slice(0,80),actor.reviewer?'admin':'user']);
       await connection.query('INSERT INTO fg_accounts(user_id,email,platform_role) VALUES($1,$2,$3) ON CONFLICT(user_id) DO UPDATE SET email=excluded.email,platform_role=excluded.platform_role',[actor.id,actor.email,actor.platformRole]);
+      if(isPublicDemo(actor))await connection.query('UPDATE users SET email=$2 WHERE id=$1',[actor.id,actor.email]);
       await connection.query(`INSERT INTO credit_accounts (user_id,available_microcredits,reserved_microcredits,version,created_at,updated_at)
         VALUES ($1,0,0,1,now(),now()) ON CONFLICT (user_id) DO NOTHING`, [actor.id]);
       await connection.query(`DELETE FROM auth_sessions WHERE user_id=$1 AND expires_at < now()`, [actor.id]);

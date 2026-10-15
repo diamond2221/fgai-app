@@ -19,7 +19,7 @@ export async function musicQueueRoute(req,res,{pool,actor,path,ownerAPI,download
  const send=(data,status=200)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify({code:status===200?0:status,data:status===200?data:null,msg:status===200?'':data.message}));};
  try{
   if(req.method==='GET'&&path.pathname==='/api/fg/music/jobs'){
-   const rows=(await pool.query(`SELECT j.*,u.display_name owner_name FROM fg_music_jobs j JOIN users u ON u.id=j.owner_id WHERE ($2::boolean OR j.owner_id=$1) ORDER BY CASE WHEN status='succeeded' THEN 1 ELSE 0 END,created_at DESC LIMIT 60`,[actor.id,actor.reviewer===true])).rows;
+   const rows=(await pool.query(`SELECT j.*,u.display_name owner_name FROM fg_music_jobs j JOIN users u ON u.id=j.owner_id WHERE ($2::boolean OR j.owner_id=$1) ORDER BY CASE WHEN j.status='succeeded' THEN 1 ELSE 0 END,j.created_at DESC LIMIT 60`,[actor.id,actor.reviewer===true])).rows;
    send({canManage:actor.reviewer===true,jobs:rows.map(publicMusicJob)});return true;
   }
   const jobMatch=/^\/api\/fg\/music\/jobs\/([0-9a-f-]{36})$/.exec(path.pathname);
