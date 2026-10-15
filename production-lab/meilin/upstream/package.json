@@ -1,0 +1,29 @@
+{
+  "name": "fg-director-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "灵犀 · FG 超级导演（本地原型）",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "vite build",
+    "start": "node server/fg-server.mjs",
+    "test": "node --test server/*.test.mjs",
+    "smoke": "node scripts/smoke-isolated.mjs"
+  },
+  "dependencies": {
+    "pg": "8.13.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.169.0",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "5.4.11"
+  }
+}

@@ -8,7 +8,7 @@ import { getAdminFeatureAvailability, updateAdminFeatureAvailability } from "@/s
 import { useUserStore, type FeatureAvailability } from "@/stores/use-user-store";
 import { AdminStatusBadge } from "./admin-ui";
 
-type FeatureKey =
+type FeatureKey = "meilinEnabled" |
     "shortDramaEnabled" | "taskCenterEnabled" | "creditsEnabled" | "customChannelsEnabled" | "inspirationSourcesVisible" | "frontendModelsEnabled" | "pluginCenterEnabled" | "systemPluginsVisibleToUsers" | "imageWorkbenchEnabled" | "videoWorkbenchEnabled";
 type FeatureRow = {
     key: FeatureKey;
@@ -20,6 +20,7 @@ type FeatureRow = {
 
 // FG: creditsEnabled is forced off by the FG gateway and stays hidden here.
 const editableFeatureKeys: FeatureKey[] = [
+    "meilinEnabled",
     "shortDramaEnabled",
     "taskCenterEnabled",
     "customChannelsEnabled",
@@ -32,6 +33,7 @@ const editableFeatureKeys: FeatureKey[] = [
 ];
 
 const workspaceFeatureRows: FeatureRow[] = [
+    { key: "meilinEnabled", title: "美林 · 超级导演", description: "开放独立导演板块；文本、图片与视频计入 FG 月度额度和人民币账单。", icon: <Clapperboard className="size-4" aria-hidden="true" /> },
     {
         key: "shortDramaEnabled",
         title: "短剧创作",
@@ -377,6 +379,7 @@ function effectiveFeatureValue(features: FeatureAvailability, key: FeatureKey) {
 
 function toEditablePayload(features: FeatureAvailability) {
     return {
+        meilinEnabled: features.meilinEnabled,
         shortDramaEnabled: features.shortDramaEnabled,
         taskCenterEnabled: features.taskCenterEnabled,
         creditsEnabled: features.creditsEnabled,
@@ -402,6 +405,7 @@ function parseFeatureAvailability(value: unknown): FeatureAvailability {
     }
     return {
         welcomeEnabled: record.welcomeEnabled as boolean,
+        meilinEnabled: record.meilinEnabled as boolean,
         shortDramaEnabled: record.shortDramaEnabled as boolean,
         taskCenterEnabled: record.taskCenterEnabled as boolean,
         creditsEnabled: record.creditsEnabled as boolean,

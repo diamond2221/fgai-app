@@ -128,6 +128,8 @@ services:
       FG_TOPICS_FILE: ${FG_TOPICS_FILE:-/run/fg-data/topics.json}
       FG_GROUP3_ACCOUNT_EMAIL: ${FG_GROUP3_ACCOUNT_EMAIL:-}
       FG_ADCRAFT_SECRET: ${FG_ADCRAFT_SECRET:?required}
+      MEILIN_INTERNAL_SECRET: ${FG_ADCRAFT_SECRET:?required}
+      MEILIN_URL: http://meilin:5310
     networks: [default, fg-platform]
     volumes:
       - ./host-metrics:/host-metrics:ro
@@ -213,6 +215,38 @@ services:
       interval: 10s
       timeout: 3s
       retries: 15
+  meilin:
+    profiles: [meilin]
+    image: ${MEILIN_IMAGE:-fg-six-meilin:development}
+    restart: unless-stopped
+    environment:
+      MEILIN_MODE: fg
+      MEILIN_BIND: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:?required}
+      MEILIN_INTERNAL_SECRET: ${FG_ADCRAFT_SECRET:?required}
+      MEILIN_GATEWAY_URL: http://gateway:3010
+      MEILIN_FILES_DIR: /nas/meilin/uploads
+      MEILIN_SKILLS_DIR: /fg-skills
+    volumes:
+      - type: bind
+        source: ${NAS_MEDIA_PATH:?required}
+        target: /nas
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MEILIN_SKILLS_PATH:-./private-skills}
+        target: /fg-skills
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:5310/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 networks:
   fg-platform:
     name: fg-studio

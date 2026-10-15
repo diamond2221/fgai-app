@@ -41,6 +41,7 @@ type FeatureAvailability struct {
 	TimelineTranscriptionEnabled bool `json:"timelineTranscriptionEnabled"`
 	ImageWorkbenchEnabled        bool `json:"imageWorkbenchEnabled"`
 	VideoWorkbenchEnabled        bool `json:"videoWorkbenchEnabled"`
+	MeilinEnabled                bool `json:"meilinEnabled"`
 }
 
 type PublicFeatureAvailability struct {

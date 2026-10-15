@@ -23,6 +23,7 @@ import {publicEntryOrigins, workspaceRequestPath, workspaceEntryURL} from './fg-
 import {initializeInspiration,startInspirationSync,inspirationRoute} from './fg-inspiration.mjs';
 import {registerSpeechStream} from './fg-speech-stream.mjs';
 import {canvasOwnersRoute} from './fg-canvas-owners.mjs';
+import {initializeMeilin,meilinInternalRoute,meilinUserRoute} from './fg-meilin.mjs';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 8 });
 const editorPool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 16 });
@@ -41,6 +42,7 @@ await initializeMusicQueue(pool);
 await initializeAdcraft(pool);
 await initializeCreator(pool);
 await initializeArcReel(pool);
+await initializeMeilin(pool);
 await initializeEditorLeases(pool);
 await initializeInspiration(pool);
 await publishExistingStoryMedia(pool);
@@ -115,6 +117,7 @@ const server = http.createServer(async (req, res) => {
     const path = parsed.url;
     if(['/api/fg-project-files','/api/fg-story-archive'].includes(path.pathname)){respond(res,403,'工程归档仅供受信任服务调用','FG_INTERNAL_ONLY');return;}
     if(await budgetInternalRoute(req,res,{pool,path}))return;
+    if(await meilinInternalRoute(req,res,{pool,web,publicOrigin,canvasSession,path}))return;
     if(await speechInternalRoute(req,res,{pool,path}))return;
     if(await adcraftInternalRoute(req,res,{pool,web,publicOrigin,canvasSession,path}))return;
     if(await creatorInternalRoute(req,res,{pool,web,publicOrigin,canvasSession,path}))return;
@@ -153,6 +156,7 @@ const server = http.createServer(async (req, res) => {
       respond(res,403,'请求来源无效','INVALID_ORIGIN'); return;
     }
     const cookie = await canvasSession(actor);
+    if(await meilinUserRoute(req,res,{pool,actor,path,web,publicOrigin,canvasSession}))return;
     if(await musicQueueRoute(req,res,{pool,actor,path,ownerAPI:async(ownerId,p,m,payload,extra)=>{
       const owner=(await pool.query('SELECT u.id,u.display_name name,a.email,a.platform_role FROM users u JOIN fg_accounts a ON a.user_id=u.id WHERE u.id=$1 AND u.status=\'active\'',[ownerId])).rows[0];
       if(!owner)throw Error('作品所属成员账号不可用');
