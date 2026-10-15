@@ -35,14 +35,14 @@ export function admissionPrice(model,capability,payload,price,fx){
  if(result.estimateKind==='partial'||result.estimateKind==='lower_bound')return null;
  return result.estimatedCny;
 }
-export async function spendUsage(pool,{userId,projectId,since,until,excludeCapExemptAudio=false}={}){
+export async function spendUsage(pool,{userId,projectId,since,until,excludeCapExemptAudio=false,allProviders=false}={}){
  const prices=new Map((await pool.query('SELECT model,snapshot FROM fg_model_prices')).rows.map(r=>[r.model,r.snapshot]));
  const fx=Number((await pool.query("SELECT value FROM fg_company_settings WHERE key='usdCnyRate'")).rows[0].value);
  const calls=(await pool.query(`SELECT c.*,t.status task_status,COALESCE(NULLIF(cv.project_id,''),p.id,r.project_id) project_id, COALESCE(f.cny,0) actual_cny,f.matches
  FROM api_call_logs c LEFT JOIN tasks t ON t.id=c.task_id LEFT JOIN canvas_projects cv ON cv.id=t.project_id LEFT JOIN projects p ON p.id=t.project_id
  LEFT JOIN fg_budget_reservations r ON r.id::text=c.fg_budget_reservation_id
  LEFT JOIN LATERAL(SELECT sum(f.usd*f.fx) cny,count(*) matches FROM fg_fee_matches m JOIN fg_provider_fees f ON f.reference_id=m.reference_id WHERE m.call_id=c.id) f ON true
- WHERE c.billable AND c.channel_id IN(SELECT id FROM model_channels WHERE name LIKE 'WeToken%' OR name IN('火山语音 · FG','Suno 音乐 · FG')) AND($1::text IS NULL OR c.user_id=$1) AND($2::text IS NULL OR COALESCE(NULLIF(cv.project_id,''),p.id,r.project_id)=$2) AND($3::timestamptz IS NULL OR c.created_at>=$3) AND($4::timestamptz IS NULL OR c.created_at<$4)`,[userId||null,projectId||null,since||null,until||null])).rows;
+ WHERE c.billable ${allProviders?'':"AND c.channel_id IN(SELECT id FROM model_channels WHERE name LIKE 'WeToken%' OR name IN('火山语音 · FG','Suno 音乐 · FG'))"} AND($1::text IS NULL OR c.user_id=$1) AND($2::text IS NULL OR COALESCE(NULLIF(cv.project_id,''),p.id,r.project_id)=$2) AND($3::timestamptz IS NULL OR c.created_at>=$3) AND($4::timestamptz IS NULL OR c.created_at<$4)`,[userId||null,projectId||null,since||null,until||null])).rows;
  let actual=0,pending=0,unknown=0;
  const reservations=(await pool.query(`SELECT r.*,c.id call_id,c.error_code FROM fg_budget_reservations r LEFT JOIN api_call_logs c ON c.fg_budget_reservation_id=r.id::text AND c.billable WHERE ($1::text IS NULL OR r.user_id=$1) AND($2::text IS NULL OR r.project_id=$2) AND($3::timestamptz IS NULL OR r.created_at>=$3) AND($4::timestamptz IS NULL OR r.created_at<$4)`,[userId||null,projectId||null,since||null,until||null])).rows;
  const byId=new Map(reservations.map(r=>[r.id,r]));
@@ -88,11 +88,13 @@ export async function reserveBudget(pool,input){
   // One-time demo allowance uses the same serialized reservation lock, all
   // historical requests and outstanding reservations. It never resets monthly
   // and intentionally includes company-audio exemptions in its safety check.
-  const lifetimeRow=(await client.query('SELECT lifetime_cny FROM fg_user_budgets WHERE user_id=$1',[input.userId])).rows[0];
-  if(lifetimeRow?.lifetime_cny!==null&&lifetimeRow?.lifetime_cny!==undefined){
+  const publicDemo=(await client.query('SELECT email FROM fg_accounts WHERE user_id=$1',[input.userId])).rows[0]?.email?.toLowerCase()==='test@beva.com';
+  if(publicDemo){
+   const lifetimeRow=(await client.query('SELECT lifetime_cny FROM fg_user_budgets WHERE user_id=$1',[input.userId])).rows[0];
+   if(lifetimeRow?.lifetime_cny===null||lifetimeRow?.lifetime_cny===undefined)throw Error('体验账号总额度尚未配置，已暂停提交');
    const lifetime=Number(lifetimeRow.lifetime_cny);
    if(!Number.isFinite(lifetime)||!(amount>=0)||amount===null)throw Error('体验账号无法确认本次费用上限，已暂停提交');
-   const usage=await spendUsage(client,{userId:input.userId});
+   const usage=await spendUsage(client,{userId:input.userId,allProviders:true});
    if(usage.unknown||microCny(usage.used)+microCny(amount)>Math.round(lifetime*1e6))throw Error('体验账号一次性总额度不足或有费用待确认，已停止新的收费生成；额度不按月恢复');
   }
   if(!capExemptAudio(input.model,snapshot)&&!(input.capability==='text'&&isCompanyText(input.model,snapshot))){
