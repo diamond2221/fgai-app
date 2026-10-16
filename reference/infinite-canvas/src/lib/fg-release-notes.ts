@@ -12,7 +12,7 @@ export const CURRENT_RELEASE_LABEL = "更新内容";
  * 发布规则：每次发布新系统版本时，必须同时更新此版本号、日期和下面的中文说明。
  * 不直接展示 Git 提交信息，避免合并、构建等技术提交干扰用户理解。
  */
-export const CURRENT_RELEASE_VERSION = "1.3.11";
+export const CURRENT_RELEASE_VERSION = "1.3.12";
 
 if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
     throw new Error(
@@ -23,6 +23,13 @@ if (CURRENT_RELEASE_VERSION !== SYSTEM_VERSION) {
 export const FG_RELEASE_NOTES: ReleaseInfo[] = [
     {
         version: CURRENT_RELEASE_VERSION,
+        date: "2026年10月16日",
+        items: [
+            { type: "优化", content: "暂不开放自行注册，首页和登录页只保留登录入口；已有账号可正常登录，新账号请联系管理员。" },
+        ],
+    },
+    {
+        version: "1.3.11",
         date: "2026年10月15日",
         items: [
             { type: "新增", content: "增加隔离的公用体验账号，一次性共用人民币额度，跨月不自动恢复；体验内容不访问公司故事、共享项目和内部素材。" },

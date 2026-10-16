@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import FGLogo from "@/components/FGLogo";
 import ThemeToggle from "@/components/ThemeToggle";
-import { companyEmailFromUsername, normalizeCompanyUsername } from "@/lib/auth/company-email";
 import { createClient } from "@/lib/local/client";
 
 const EchoText: any = dynamic(() => import("@/components/react-bits/EchoText"), { ssr: false });
@@ -68,9 +67,7 @@ export default function Landing() {
   const localClient = useMemo(() => createClient(), []);
   const [authed, setAuthed] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -113,22 +110,14 @@ export default function Landing() {
 
   async function submit() {
     setMessage("");
-    const companyEmail = mode === "signup" ? companyEmailFromUsername(username) : email.trim().toLowerCase();
-    if (!companyEmail) { setMessage("请输入 @beva.com 前的用户名，例如 meilinte。"); return; }
+    const companyEmail = email.trim().toLowerCase();
+    if (!companyEmail) { setMessage("请输入邮箱。"); return; }
     if (password.length < 6) { setMessage("密码至少需要 6 位。"); return; }
     setBusy(true);
     try {
-      if (mode === "signup") {
-        const { error } = await localClient.auth.signUp({ email: companyEmail, password });
-        if (error) throw error;
-        const { data } = await localClient.auth.getSession();
-        if (data.session) router.replace("/workspace");
-        else setMessage("注册成功，请到公司邮箱完成验证后再登录。");
-      } else {
-        const { error } = await localClient.auth.signInWithPassword({ email: companyEmail, password });
-        if (error) throw error;
-        router.replace("/workspace");
-      }
+      const { error } = await localClient.auth.signInWithPassword({ email: companyEmail, password });
+      if (error) throw error;
+      router.replace("/workspace");
     } catch (error: any) {
       setMessage(error?.message || "暂时无法完成操作，请稍后再试。");
     } finally {
@@ -229,7 +218,7 @@ export default function Landing() {
 
       <footer className="flex flex-wrap items-center justify-between gap-3 bg-[#08090d] px-5 py-8 text-[11px] text-white/55 sm:px-9 lg:px-12"><span className="inline-flex items-center gap-2 font-medium text-white"><FGLogo size={22} /> FG STUDIO</span><span>FableGlitch AI production workspace</span><Link href="/login" className="transition hover:text-[#7effd4]">登录工作区 <span aria-hidden="true">→</span></Link></footer>
 
-      {showAuth && <div className="fixed inset-0 z-[100] grid place-items-center bg-[#08080c]/75 p-5 backdrop-blur-md" onClick={() => !busy && setShowAuth(false)}><div className="w-[420px] max-w-full rounded-[25px] border border-white/15 bg-[#17171f]/95 p-7 text-white shadow-[0_30px_80px_rgba(0,0,0,.55)]" onClick={(event) => event.stopPropagation()}><div className="mb-5 flex items-start justify-between gap-3"><div><div className="font-mono text-[10px] uppercase tracking-[.18em] text-[#65e9ff]">FG STUDIO / ACCESS</div><h3 className="mt-2 font-disp text-[25px] font-semibold tracking-tight">{mode === "signin" ? "登录工作区" : "注册账号"}</h3></div><button onClick={() => !busy && setShowAuth(false)} className="grid h-8 w-8 place-items-center rounded-full border border-white/15 text-white/65 transition hover:bg-white/10 hover:text-white" aria-label="关闭">×</button></div>{mode === "signup" ? <div className="mb-3 flex overflow-hidden rounded-xl border border-white/15 bg-white/[.05] focus-within:border-[#65e9ff]"><input className="min-w-0 flex-1 bg-transparent px-3.5 py-3 text-[15px] text-white outline-none placeholder:text-white/35" value={username} placeholder="例如：meilinte" autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(event) => setUsername(normalizeCompanyUsername(event.target.value))} /><span className="flex items-center border-l border-white/10 px-3 text-[13px] text-[#65e9ff]">@beva.com</span></div> : <input className="mb-3 w-full rounded-xl border border-white/15 bg-white/[.05] px-3.5 py-3 text-[15px] text-white outline-none placeholder:text-white/35 focus:border-[#65e9ff]" value={email} placeholder="yourname@beva.com" autoCapitalize="none" onChange={(event) => setEmail(event.target.value)} />}<input className="w-full rounded-xl border border-white/15 bg-white/[.05] px-3.5 py-3 text-[15px] text-white outline-none placeholder:text-white/35 focus:border-[#65e9ff]" type="password" value={password} placeholder="密码（至少 6 位）" onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submit()} />{message && <p className="mt-3 text-[13px] leading-relaxed text-[#ffb0c4]">{message}</p>}<button disabled={busy} onClick={submit} className="mt-4 w-full rounded-full bg-[#65e9ff] py-3 text-[14px] font-semibold text-[#08161d] transition hover:brightness-110 disabled:opacity-55">{busy ? "处理中…" : mode === "signin" ? "登录" : "注册并登录"}</button><p className="mt-5 text-center text-[13px] text-white/55">{mode === "signin" ? "还没有账号？" : "已有账号？"} <button className="font-medium text-[#65e9ff] hover:underline" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMessage(""); }}>{mode === "signin" ? "去注册" : "去登录"}</button></p><p className="mt-5 border-t border-white/10 pt-4 text-[11px] leading-relaxed text-white/45">注册仅允许公司 <b className="text-[#65e9ff]">@beva.com</b> 邮箱。</p></div></div>}
+      {showAuth && <div className="fixed inset-0 z-[100] grid place-items-center bg-[#08080c]/75 p-5 backdrop-blur-md" onClick={() => !busy && setShowAuth(false)}><div className="w-[420px] max-w-full rounded-[25px] border border-white/15 bg-[#17171f]/95 p-7 text-white shadow-[0_30px_80px_rgba(0,0,0,.55)]" onClick={(event) => event.stopPropagation()}><div className="mb-5 flex items-start justify-between gap-3"><div><div className="font-mono text-[10px] uppercase tracking-[.18em] text-[#65e9ff]">FG STUDIO / ACCESS</div><h3 className="mt-2 font-disp text-[25px] font-semibold tracking-tight">登录工作区</h3></div><button onClick={() => !busy && setShowAuth(false)} className="grid h-8 w-8 place-items-center rounded-full border border-white/15 text-white/65 transition hover:bg-white/10 hover:text-white" aria-label="关闭">×</button></div><input className="mb-3 w-full rounded-xl border border-white/15 bg-white/[.05] px-3.5 py-3 text-[15px] text-white outline-none placeholder:text-white/35 focus:border-[#65e9ff]" value={email} placeholder="yourname@beva.com" autoCapitalize="none" onChange={(event) => setEmail(event.target.value)} /><input className="w-full rounded-xl border border-white/15 bg-white/[.05] px-3.5 py-3 text-[15px] text-white outline-none placeholder:text-white/35 focus:border-[#65e9ff]" type="password" value={password} placeholder="密码（至少 6 位）" onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submit()} />{message && <p className="mt-3 text-[13px] leading-relaxed text-[#ffb0c4]">{message}</p>}<button disabled={busy} onClick={submit} className="mt-4 w-full rounded-full bg-[#65e9ff] py-3 text-[14px] font-semibold text-[#08161d] transition hover:brightness-110 disabled:opacity-55">{busy ? "处理中…" : "登录"}</button><p className="mt-5 border-t border-white/10 pt-4 text-[11px] leading-relaxed text-white/45">仅限已有账号登录。如需开通账号，请联系管理员。</p></div></div>}
     </main>
   );
 }
